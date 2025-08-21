@@ -1,0 +1,14 @@
+[Unit]
+Description=Iot-gateway-net sample thing
+After=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Iot-gateway-net/sample/thing
+ExecStart=/home/pi/Iot-gateway-net/sample/thing/venv/bin/python server.py
+Restart=on-failure
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

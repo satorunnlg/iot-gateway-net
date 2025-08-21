@@ -414,6 +414,7 @@ flowchart LR
 ## サンプルコード固有の要件（分離セクション）
 
 > ここは**参考実装**の条件であり、アーキテクチャ要件とは分離しています。
+* サンプル固有の要件や利用方法については [`sample/README.md`](./sample/README.md) を参照してください。  
 
 ### サーバ機（Raspberry Pi）
 
@@ -542,14 +543,21 @@ Content-Security-Policy:
 
 ```
 Iot-gateway-net/
-├─ server/                    # （参考）設備側サンプル
-│   ├─ server.py
-│   └─ requirements.txt
-├─ client/                    # （参考）UIサンプル（S3配布用）
-│   ├─ index.html
-│   ├─ app.js
-│   └─ config.js
-└─ README.md
+├─ README.md                 # プロジェクト全体の仕様・設計・セキュリティ要件
+├─ AWS_Console_Setup_Manual.md   # インテグレータ向け AWS 設定手順書（詳細）
+├─ sample/                   # サンプル一式
+│  ├─ README.md              # サンプル実行のための手順（S3 + Thing）
+│  ├─ s3/                    # ブラウザ配布物（S3/CloudFront）
+│  │  ├─ index.html
+│  │  ├─ app.js
+│  │  └─ config.js
+│  └─ thing/                 # 設備側（Raspberry Pi, Python）
+│     ├─ server.py
+│     ├─ requirements.txt
+│     ├─ certs/              # 証明書置き場（git管理しない）
+│     │  └─ .gitkeep
+│     └─ venv/               # Python仮想環境（git管理しない）
+└─ .gitignore
 ```
 
 ---

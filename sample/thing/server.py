@@ -27,9 +27,9 @@ import paho.mqtt.client as mqtt
 IOT_ENDPOINT = "xxxxxxxxxxxxxx-ats.iot.ap-northeast-1.amazonaws.com"  # TODO: IoT Core デバイスデータエンドポイント
 THING_NAME   = "AMR-001"                                              # TODO: Thing 名
 SHADOW_NAME  = "robot"                                                # 名前付きShadow
-ROOT_CA_PATH = "/certs/AmazonRootCA1.pem"                             # TODO: ルートCA
-CERT_PATH    = "/certs/device.pem.crt"                                # TODO: 本番デバイス証明書
-KEY_PATH     = "/certs/private.pem.key"                               # TODO: 本番秘密鍵
+ROOT_CA_PATH = "./certs/AmazonRootCA1.pem"
+CERT_PATH    = "./certs/device.pem.crt"
+KEY_PATH     = "./certs/private.pem.key"
 
 # トピック
 TOPIC_CALL   = f"amr/{THING_NAME}/cmd/call"
