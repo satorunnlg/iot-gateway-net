@@ -161,20 +161,20 @@
 flowchart TD
   subgraph Device["設備・端末"]
     AMR1["AMR（ブートストラップ証明書 20年）"]
-    AMR2["設備端末"]
+    AMR2["設備端末（OpenSSL発行証明書）"]
     Mobile["モバイル端末（UI共有アカウント）"]
     PC["PC（UI共有アカウント）"]
   end
 
   subgraph AWS["AWS（ap-northeast-1）"]
     IoTCore["AWS IoT Core"]
-    Cert["ブートストラップ証明書（20年）"]
+    Cert["CA証明書（OpenSSL RootCA）"]
     API["API Gateway + WAF"]
     CloudWatch["CloudWatch Logs / SNS"]
   end
 
   AMR1 -->|Bootstrap Cert| IoTCore
-  AMR2 --> IoTCore
+  AMR2 -->|OpenSSL Device Cert| IoTCore
   IoTCore --> CloudWatch
   Mobile -->|HTTPS| API
   API --> IoTCore
