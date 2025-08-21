@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>AMR 呼出し - Iot-gateway-net</title>
+	<style>
+		body {
+			font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+			margin: 0;
+			padding: 0;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			min-height: 100vh;
+			background: #f9fafb;
+		}
+
+		.card {
+			width: 90%;
+			max-width: 560px;
+			background: #fff;
+			border-radius: 16px;
+			box-shadow: 0 6px 16px rgba(0, 0, 0, .08);
+			padding: 20px;
+		}
+
+		h1 {
+			margin: 0 0 8px;
+			font-size: 1.4rem;
+			text-align: center;
+		}
+
+		.muted {
+			color: #666;
+			font-size: .9rem;
+			text-align: center;
+			margin-bottom: 12px;
+		}
+
+		.row {
+			margin: 12px 0;
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+		}
+
+		label {
+			font-weight: 600;
+		}
+
+		select,
+		button {
+			padding: 12px;
+			font-size: 1rem;
+			border-radius: 10px;
+			border: 1px solid #d1d5db;
+		}
+
+		button.primary {
+			background: #2563eb;
+			color: #fff;
+			border-color: #2563eb;
+			cursor: pointer;
+		}
+
+		button.primary:disabled {
+			background: #9ca3af;
+			border-color: #9ca3af;
+			cursor: not-allowed;
+		}
+
+		.status {
+			font-weight: 700;
+			font-size: 1.2rem;
+			text-align: center;
+		}
+
+		.warn {
+			color: #b91c1c;
+		}
+
+		.ok {
+			color: #065f46;
+		}
+
+		.row.inline {
+			flex-direction: row;
+			align-items: center;
+			gap: 12px;
+		}
+
+		.grow {
+			flex: 1;
+		}
+
+		.right {
+			text-align: right;
+		}
+
+		.small {
+			font-size: .85rem;
+			color: #555;
+		}
+
+		@media (min-width: 640px) {
+			h1 {
+				font-size: 1.8rem;
+			}
+
+			button {
+				font-size: 1.05rem;
+			}
+		}
+	</style>
+</head>
+
+<body>
+	<div class="card">
+		<h1>AMR 呼出し</h1>
+		<div class="muted">共有アカウント方式（Passkey）／ 東京リージョン</div>
+
+		<div class="row">
+			<label>接続 / 認証</label>
+			<div id="authArea" class="row inline">
+				<button id="loginBtn" class="primary">サインイン</button>
+				<button id="registerBtn">この端末を登録</button>
+				<button id="logoutBtn">サインアウト</button>
+				<div id="authInfo" class="small grow right">未認証</div>
+			</div>
+		</div>
+
+		<div class="row">
+			<label for="status">ステータス</label>
+			<div id="status" class="status">—</div>
+			<div id="hbInfo" class="small">HB: —</div>
+		</div>
+
+		<div class="row inline">
+			<div class="grow">
+				<label for="dest">行先</label>
+				<select id="dest"></select>
+			</div>
+			<div>
+				<label>&nbsp;</label>
+				<button id="callBtn" class="primary" disabled>接続中...</button>
+			</div>
+		</div>
+
+		<div class="row small">
+			初回のみ Hosted UI で Passkey 登録・サインインが必要です。以後は自動サインインされます。
+		</div>
+	</div>
+
+	<!-- ライブラリ（CDN, UMD / ESM不使用） -->
+	<!-- AWS SDK v2（Cognito Identity, SigV4用ユーティリティ）-->
+	<script src="https://sdk.amazonaws.com/js/aws-sdk-2.1481.0.min.js" crossorigin="anonymous"></script>
+	<!-- Paho MQTT（WebSocket MQTTクライアント） -->
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/mqttws31.min.js" integrity=""
+		crossorigin="anonymous"></script>
+
+	<!-- アプリコード -->
+	<script src="./config.js"></script>
+	<script src="./app.js"></script>
+</body>
+
+</html>
