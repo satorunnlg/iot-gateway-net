@@ -170,7 +170,5 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Django file
-*/migrations/
-
-
+*.crt
+*.key
