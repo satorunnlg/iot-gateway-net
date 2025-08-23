@@ -19,15 +19,15 @@ IOT_ENDPOINT = "a2osrgpri6xnln-ats.iot.ap-northeast-1.amazonaws.com"  # IoT デ�
 PORT = 8883
 
 # claim（20年・更新専用）で最初に接続する
-CLAIM_CERT = "./cert/claim.crt"
-CLAIM_KEY  = "./cert/claim.key"
+CLAIM_CERT = "./certs/claim.crt"
+CLAIM_KEY  = "./certs/claim.key"
 
 # 新しい本番証明書/鍵を書き出す先
-NEW_CERT_OUT = "./cert/new_production.crt"
-NEW_KEY_OUT  = "./cert/new_production.key"
+NEW_CERT_OUT = "./certs/new_production.crt"
+NEW_KEY_OUT  = "./certs/new_production.key"
 
 # Amazon ルート CA（例：AmazonRootCA1.pem）
-ROOT_CA = "./cert/AmazonRootCA1.pem"
+ROOT_CA = "./certs/AmazonRootCA1.pem"
 
 # Fleet Provisioning
 TEMPLATE_NAME = "amr-prod-template"
