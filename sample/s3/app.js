@@ -148,9 +148,11 @@
 })();
 
 // --- 追加: メニュー「デバイスを登録」→ パスキー登録フロー（最小追記） ---
+// メニュー「パスキー登録/削除」トグル対応
 // 参照: README の「認証 > Passkeys（ユーザープール）」、手順書の該当セクション
 (function attachRegisterDeviceHandler() {
 	const btn = document.getElementById('menuRegisterDevice');
+	const menuEl = document.getElementById('appMenu');
 	if (!btn) return;
 
 	const cfg = window.IOTGW_CONFIG;
@@ -188,27 +190,20 @@
 		return js;
 	}
 
-	// パスキー登録フロー
-	async function registerPasskey(accessToken) {
+	// --- WebAuthn: 登録/一覧/削除 ---
+	async function startRegister(accessToken) {
 		// 1) Start
-		const start = await cognito("StartWebAuthnRegistration", { AccessToken: accessToken }, accessToken);
-		let opts =
-			start.PublicKeyCredentialCreationOptions ||
-			start.CredentialCreationOptions ||
-			start.Options ||
-			start.CREDENTIAL_CREATION_OPTIONS;
-		if (typeof opts === "string") { try { opts = JSON.parse(opts); } catch { } }
+		const start = await cognito("StartWebAuthnRegistration", { AccessToken: accessToken }, accessToken); // :contentReference[oaicite:1]{index=1}
+		let opts = start.PublicKeyCredentialCreationOptions || start.CredentialCreationOptions || start.Options || start.CREDENTIAL_CREATION_OPTIONS;
+		if (typeof opts === "string") try { opts = JSON.parse(opts); } catch { }
 		if (!opts) throw new Error("登録オプションを取得できませんでした。");
 
 		// 2) navigator.credentials.create のために各フィールドを整形
 		opts.challenge = b64uToBuf(opts.challenge);
 		if (opts.user && typeof opts.user.id === "string") opts.user.id = b64uToBuf(opts.user.id);
 		if (Array.isArray(opts.excludeCredentials)) {
-			opts.excludeCredentials = opts.excludeCredentials.map(c => ({
-				...c, id: typeof c.id === "string" ? b64uToBuf(c.id) : c.id
-			}));
+			opts.excludeCredentials = opts.excludeCredentials.map(c => ({ ...c, id: typeof c.id === "string" ? b64uToBuf(c.id) : c.id }));
 		}
-
 		const cred = await navigator.credentials.create({ publicKey: opts });
 		if (!cred) throw new Error("パスキー作成がキャンセルされました。");
 
@@ -224,38 +219,73 @@
 			},
 			clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
 		};
-
-		return cognito("CompleteWebAuthnRegistration", {
-			AccessToken: accessToken,
-			Credential: regJSON
-		}, accessToken);
+		await cognito("CompleteWebAuthnRegistration", { AccessToken: accessToken, Credential: regJSON }, accessToken); // :contentReference[oaicite:2]{index=2}
+	}
+	async function listPasskeys(accessToken) {
+		const r = await cognito("ListWebAuthnCredentials", { AccessToken: accessToken, MaxResults: 20 }, accessToken); // :contentReference[oaicite:3]{index=3}
+		return Array.isArray(r.Credentials) ? r.Credentials : [];
+	}
+	async function deletePasskey(accessToken, credentialId) {
+		await cognito("DeleteWebAuthnCredential", { AccessToken: accessToken, CredentialId: credentialId }, accessToken); // :contentReference[oaicite:4]{index=4}
 	}
 
-	// クリックで実行（ユーザー操作起点）
+	// 同一RPの資格情報だけ対象（rpId は location.hostname のサブドメイン許容）
+	const isSameRp = (rpId) => {
+		const host = location.hostname;
+		return host === rpId || host.endsWith("." + rpId) || rpId.endsWith("." + host);
+	};
+
+	// --- UI状態管理 ---
+	let mode = "register";      // "register" | "delete"
+	let currentRpCreds = [];    // このRPに紐づく既存パスキー（0個以上）
+
+	async function refreshButton() {
+		const accessToken = sessionStorage.getItem('access_token');
+		if (!accessToken) { btn.textContent = "パスキーを登録"; btn.disabled = true; return; }
+		const all = await listPasskeys(accessToken);
+		currentRpCreds = all.filter(c => isSameRp(c.RelyingPartyId));
+		if (currentRpCreds.length > 0) {
+			mode = "delete";
+			btn.textContent = "パスキーを削除";
+		} else {
+			mode = "register";
+			btn.textContent = "パスキーを登録";
+		}
+		btn.disabled = false;
+	}
+
 	btn.addEventListener('click', async (e) => {
 		e.preventDefault();
-		try {
 			const accessToken = sessionStorage.getItem('access_token');
-			if (!accessToken) throw new Error("サインイン情報が見つかりません。サインインし直してください。");
+		if (!accessToken) { alert("サインイン情報が見つかりません。サインインし直してください。"); return; }
 
+		const orig = btn.textContent;
 			btn.disabled = true;
-			const originalLabel = btn.textContent;
+
+		try {
+			if (mode === "register") {
 			btn.textContent = "登録中…";
-
-			await registerPasskey(accessToken);
-
-			btn.textContent = "登録しました";
-			// 少し表示してから元に戻す
-			setTimeout(() => {
-				btn.textContent = originalLabel;
-				btn.disabled = false;
-			}, 1200);
+				await startRegister(accessToken);
+				await refreshButton();                   // → 「削除」に切替
+			} else {
+				btn.textContent = "削除中…";
+				for (const cred of currentRpCreds) {     // 同一RPの登録を全削除
+					await deletePasskey(accessToken, cred.CredentialId);
+				}
+				localStorage.removeItem("remember_username"); // 次回はPW画面に
+				await refreshButton();                   // → 「登録」に切替
+			}
+			if (menuEl && menuEl.open) menuEl.open = false; // 操作後はメニューを閉じる
 		} catch (err) {
-			console.error("[register device passkey] error:", err);
-			alert("パスキー登録に失敗しました: " + (err?.message || err));
-			btn.textContent = "デバイスを登録";
+			console.error("[passkey toggle] error:", err);
+			alert("処理に失敗しました: " + (err?.message || err));
+			btn.textContent = orig;
+		} finally {
 			btn.disabled = false;
 		}
 	});
+
+	// 初期化：登録有無でラベル設定
+	refreshButton().catch((e) => console.warn("ListWebAuthnCredentials 失敗:", e));
 })();
 
