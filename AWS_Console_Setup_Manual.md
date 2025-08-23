@@ -169,6 +169,51 @@
 
    * `InitiateAuth`/`RespondToAuthChallenge` は**パスキー（`WEB_AUTHN`）**を含む**選択式**で動く。クライアントにシークレットがある場合は\*\*`SECRET_HASH` が必須\*\*になるので、\*\*ブラウザ用は“シークレット無し”\*\*が鉄則。([AWS ドキュメント][18])
 
+### 8.1 初回ログインを有効にするための認証フロー設定（必須）
+
+**目的**：初回だけメール＋パスワードでログイン→新パスワードに変更→以降はパスキー（WebAuthn）に切替えるため、**`ALLOW_USER_PASSWORD_AUTH` を必ず ON**にします。既存の選択式サインイン **`ALLOW_USER_AUTH`** に**追加**で有効化します。
+
+#### A. コンソール（日本語UI）での操作
+
+1. **Cognito → ユーザープール →（対象プール）→ アプリケーション → アプリクライアント**を開く。
+2. 対象の**アプリクライアント**を編集し、\*\*クライアントシークレットが無い（Public）\*\*ことを確認する（Secret があるとブラウザ直呼びで `SECRET_HASH` が必須になり失敗します）。
+3. \*\*Authentication flows（認証フロー）\*\*で以下を有効化して保存：
+
+   * **選択式サインイン**：`ALLOW_USER_AUTH`（WebAuthn などの選択式チャレンジ用）
+   * **ユーザーパスワード（非 SRP）**：`ALLOW_USER_PASSWORD_AUTH`（初回ログイン用・必須）
+   * （任意）**ユーザーパスワード（SRP）**：`ALLOW_USER_SRP_AUTH`
+   * **リフレッシュトークン**：`ALLOW_REFRESH_TOKEN_AUTH`（推奨）
+
+> メモ：**パスキーの RP ID（サードパーティドメイン）**設定は**ユーザープール側**の「Passkeys」で CloudFront の配信FQDNを必ず登録してください（例：`dg029bjh15kpm.cloudfront.net`）。ここが未設定/不一致だと 2 回目以降のパスキーが失敗します。
+
+#### B. CLI でまとめて設定（任意・確認込み）
+
+```powershell
+# 変数（例）
+$Region     = "ap-northeast-1"
+$UserPoolId = "<YOUR_USER_POOL_ID>"
+$ClientId   = "<YOUR_APP_CLIENT_ID>"
+
+# 現状の確認
+aws cognito-idp describe-user-pool-client `
+  --region $Region `
+  --user-pool-id $UserPoolId `
+  --client-id $ClientId `
+  --query "UserPoolClient.{ClientId:ClientId,Secret:ClientSecret,Flows:ExplicitAuthFlows}"
+
+# 必須フローを付与（初回ログインを許可）
+aws cognito-idp update-user-pool-client `
+  --region $Region `
+  --user-pool-id $UserPoolId `
+  --client-id $ClientId `
+  --explicit-auth-flows ALLOW_USER_AUTH ALLOW_USER_PASSWORD_AUTH ALLOW_USER_SRP_AUTH ALLOW_REFRESH_TOKEN_AUTH
+```
+
+#### C. 動作確認（UI 側）
+
+* **初回**：メール＋パスワードでサインイン → `NEW_PASSWORD_REQUIRED` が来たら変更 → ログイン成功 → **パスキー登録**を案内（`signin.js` のフロー）。
+* **2回目以降**：保存済みのユーザー名＋**パスキーで入力レス**サインイン。
+* \*\*Hosted UI を使わない（カスタムUI）\*\*方針は既存記述どおり（ドメイン設定は必須ではありません）。
 ---
 
 ## 9. （必要なら）ユーザー作成と初回パスワード確定
@@ -270,6 +315,9 @@ python .\check_aws_environment.py
 * **User: org-operator** … `Enabled & CONFIRMED`（新規作成直後は `FORCE_CHANGE_PASSWORD`。`admin-set-user-password --permanent` で確定可能）。([sdk.amazonaws.com][19])
 * **Identity Pool** … `ProviderName=cognito-idp.<region>.amazonaws.com/<UserPoolId>` に **AppClientId** が一致。
 * **S3 favicon** … `image/x-icon` などが付与されて存在。
+* **期待値**：`ExplicitAuthFlows` に
+  `ALLOW_USER_AUTH`, `ALLOW_USER_PASSWORD_AUTH`,（任意で `ALLOW_USER_SRP_AUTH`）, `ALLOW_REFRESH_TOKEN_AUTH` が含まれる。
+* **NG例**：`ALLOW_USER_PASSWORD_AUTH` が無い → 初回のメール＋パスワードサインインで**400: USER\_PASSWORD\_AUTH flow not enabled**となる（現象再現済み）。
 
 ---
 
