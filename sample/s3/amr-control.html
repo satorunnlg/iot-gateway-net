@@ -22,8 +22,23 @@
 			</div>
 			<div class="header-actions">
 				<span id="conn-badge" class="badge"><span class="dot idle"></span>offline</span>
-				<!-- ここに集約し、id を logoutBtn に統一 -->
-				<button id="logoutBtn" class="btn">サインアウト</button>
+				<!-- ▼ 追加：バーガーメニュー（details/summaryでJS不要・最小差分） -->
+				<!-- 追加：バーガーメニュー -->
+				<details id="appMenu" class="menu">
+					<summary id="menuToggle" class="icon-btn" aria-label="メニュー" role="button">
+						<span class="hamburger" aria-hidden="true">
+							<span></span><span></span><span></span>
+						</span>
+					</summary>
+
+					<div class="card menu-list">
+						<div class="row">
+							<button id="menuRegisterDevice" class="btn">デバイスを登録</button>
+							<!-- 既存のサインアウトIDは維持（app.js無改修でOK） -->
+							<button id="logoutBtn" class="btn-outline">サインアウト</button>
+						</div>
+					</div>
+				</details>
 			</div>
 		</header>
 

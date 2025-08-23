@@ -123,3 +123,26 @@
 		connect(AWS.config.credentials);
 	});
 })();
+
+// --- 追加: バーガーメニューの外側クリック/Escで閉じる ---
+(function attachMenuCloser() {
+	const menu = document.getElementById('appMenu');
+	if (!menu) return;
+
+	// メニュー項目をクリックしたら閉じる
+	const closeOnClick = (el) => el && el.addEventListener('click', () => { menu.open = false; });
+	closeOnClick(document.getElementById('logoutBtn'));
+	closeOnClick(document.getElementById('menuRegisterDevice'));
+
+	// 外側クリックで閉じる
+	document.addEventListener('click', (e) => {
+		if (!menu.open) return;
+		if (menu.contains(e.target)) return; // メニュー内のクリックは無視
+		menu.open = false;
+	});
+
+	// Escで閉じる
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && menu.open) menu.open = false;
+	});
+})();

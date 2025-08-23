@@ -451,3 +451,112 @@ button.primary,
 .hidden {
 	display: none !important
 }
+
+/* details/summary のデフォ三角を消す */
+.menu summary::-webkit-details-marker {
+	display: none;
+}
+
+.menu summary::marker {
+	content: "";
+}
+
+/* アイコンボタン（既存ボタンと統一感） */
+.icon-btn {
+	display: inline-grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	padding: 0;
+	border: 1px solid currentColor;
+	border-radius: 0.75rem;
+	/* 既存の角丸トークンに寄せる */
+	background: transparent;
+	cursor: pointer;
+	line-height: 0;
+	transition: background .2s ease, color .2s ease, border-color .2s ease;
+}
+
+.icon-btn:focus-visible {
+	outline: 2px solid currentColor;
+	outline-offset: 2px;
+}
+
+/* 3本線（currentColorで描くのでテーマに馴染む） */
+.hamburger {
+	display: inline-block;
+	width: 18px;
+	height: 14px;
+	position: relative;
+}
+
+.hamburger span {
+	position: absolute;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background: currentColor;
+	border-radius: 1px;
+	transform-origin: center;
+	transition: transform .18s ease, opacity .18s ease;
+}
+
+.hamburger span:nth-child(1) {
+	top: 0;
+}
+
+.hamburger span:nth-child(2) {
+	top: 6px;
+}
+
+.hamburger span:nth-child(3) {
+	top: 12px;
+}
+
+/* open時は反転（ブランド色）＋「×」アニメ変形 */
+.menu[open] .icon-btn {
+	color: var(--panel);
+	/* 既存トークンを想定 */
+	background: var(--brand);
+	border-color: var(--brand);
+}
+
+/* 1本目: 斜め 45° に */
+.menu[open] .hamburger span:nth-child(1) {
+	transform: translateY(6px) rotate(45deg);
+}
+
+/* 2本目: フェードアウト */
+.menu[open] .hamburger span:nth-child(2) {
+	opacity: 0;
+	transform: scaleX(0.4);
+}
+
+/* 3本目: 斜め -45° に */
+.menu[open] .hamburger span:nth-child(3) {
+	transform: translateY(-6px) rotate(-45deg);
+}
+
+/* メニューパネルのポップ配置（右上） */
+.menu {
+	position: relative;
+}
+
+.menu .menu-list {
+	position: absolute;
+	right: 0;
+	margin-top: 8px;
+	min-width: 220px;
+	z-index: 20;
+}
+
+/* アニメを好まない環境の配慮 */
+@media (prefers-reduced-motion: reduce) {
+	.hamburger span {
+		transition: none;
+	}
+
+	.icon-btn {
+		transition: none;
+	}
+}
