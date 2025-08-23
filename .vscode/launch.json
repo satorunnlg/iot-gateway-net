@@ -12,6 +12,13 @@
 			"console": "integratedTerminal"
 		},
 		{
+			"name": "Python デバッガー: check_aws_environment",
+			"type": "debugpy",
+			"request": "launch",
+			"program": "${workspaceFolder}\\check_aws_environment.py",
+			"console": "integratedTerminal"
+		},
+		{
 			"name": "Python デバッガー: provision_and_verify",
 			"type": "debugpy",
 			"request": "launch",
