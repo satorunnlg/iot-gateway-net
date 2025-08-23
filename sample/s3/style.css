@@ -560,3 +560,73 @@ button.primary,
 		transition: none;
 	}
 }
+
+/* ▼ 外枠（カード）は残しつつ、内側はフラット＆角丸なしに見えるよう調整 */
+.menu .menu-list.card {
+	position: absolute;
+	right: 0;
+	margin-top: 8px;
+	min-width: 240px;
+	z-index: 20;
+	padding: 4px 0;
+	/* 左右パディングを無くして境界と揃える */
+	overflow: hidden;
+	/* 内側の角丸表現を消してフラットに見せる */
+	/* .card の枠・影・外側角丸は既存のまま活かす */
+}
+
+/* 内側コンテナ（リスト内側は上下だけ余白、左右は外枠とフラット） */
+.menu-items {
+	display: block;
+	padding: 4px 0;
+}
+
+/* ▼ “ボタンっぽさ”を排除したフラットな項目 */
+.menu-item {
+	appearance: none;
+	width: 100%;
+	text-align: left;
+	background: transparent;
+	color: var(--text);
+	border: 0;
+	border-radius: 0;
+	/* 角丸なし */
+	padding: 10px 14px;
+	line-height: 1.2;
+	font: inherit;
+	/* 太字をやめて本文準拠の見た目に */
+	cursor: pointer;
+	transition: background .15s ease, color .15s ease;
+}
+
+/* ▼ 仕切り線は上下のみ：2個目以降にだけ上線を引く（左右は外枠が境界） */
+.menu-item+.menu-item {
+	border-top: 1px solid var(--line);
+}
+
+/* ▼ ホバーで反転（デスクトップ等のポインタ環境だけ） */
+@media (hover: hover) {
+	.menu-item:hover {
+		/* べた塗りではなく “うっすら反転” にしてボタン感を抑える */
+		background: color-mix(in srgb, var(--brand) 12%, transparent);
+		color: var(--text);
+	}
+}
+
+/* ▼ キーボード操作のフォーカスも控えめに（枠線ではなく内側の淡い反転） */
+.menu-item:focus-visible {
+	outline: none;
+	box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--brand) 35%, transparent);
+}
+
+/* 危険操作などの強調（任意） */
+.menu-item.danger:hover {
+	background: var(--danger);
+	color: #fff;
+}
+
+/* メニュー外枠と項目の左右をフラットに見せるため、.card のパディングを微調整 */
+.menu .menu-list.card {
+	padding: 6px 0;
+	/* 左右の内側パディングを消す */
+}

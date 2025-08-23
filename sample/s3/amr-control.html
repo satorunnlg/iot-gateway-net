@@ -32,11 +32,10 @@
 					</summary>
 
 					<div class="card menu-list">
-						<div class="row">
-							<button id="menuRegisterDevice" class="btn">デバイスを登録</button>
-							<!-- 既存のサインアウトIDは維持（app.js無改修でOK） -->
-							<button id="logoutBtn" class="btn-outline">サインアウト</button>
-						</div>
+						<nav class="menu-items" role="menu" aria-label="アプリメニュー">
+							<button id="menuRegisterDevice" class="menu-item" role="menuitem">デバイスを登録</button>
+							<button id="logoutBtn" class="menu-item danger" role="menuitem">サインアウト</button>
+						</nav>
 					</div>
 				</details>
 			</div>
