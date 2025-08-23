@@ -149,6 +149,7 @@
 		}
 		if (pubKey.timeout) pubKey.timeout = Number(pubKey.timeout);
 
+		// 5) ブラウザでパスキー認証
 		const cred = await navigator.credentials.get({ publicKey: pubKey });
 		const authnJSON = {
 			id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
@@ -161,6 +162,7 @@
 			clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
 		};
 
+		// 6) WEB_AUTHN チャレンジに回答して最終トークンを受領
 		const resp = await cognito("RespondToAuthChallenge", {
 			ClientId: cfg.userPoolClientId,
 			Session: session,
