@@ -1,6 +1,6 @@
 /**
- * 役割: サインイン画面（初回=PW/必要なら変更, 2回目以降=パスキー）→ 成功後に amr-control.html へ遷移
- * 参照: README の「認証 / Passkeys / ID プール」章、手順書の Cognito 設定章を参照。
+ * 役割: サインイン画面（初回=PW/必要なら変更, 2回目以降=パスキー）→ 成功後は直接 AMR 操作画面へ遷移
+ * 参照: README の「認証 / Passkeys / ID プール / 画面遷移」章、手順書の Cognito 設定章
  * 注意: Public クライアント前提（SECRET_HASH は使わない）。外部 CDN は使わない（CSP 'self'）。
  */
 (function () {
@@ -51,7 +51,7 @@
 	function extractRequestOptions(params) {
 		// 1) ベンダ差異に強い順で拾う
 		let opt =
-			params.CREDENTIAL_REQUEST_OPTIONS || // ← あなたの環境で返ってきているキー
+			params.CREDENTIAL_REQUEST_OPTIONS ||
 			params.PublicKeyCredentialRequestOptions ||
 			params.publicKeyCredentialRequestOptions ||
 			params.WEBAUTHN_PUBLIC_KEY_CREDENTIAL_REQUEST_OPTIONS ||
@@ -233,8 +233,8 @@
 				setStatus("パスキー自動サインイン中…");
 				const auth = await signInWithPasskey(state.remembered.trim());
 				saveTokens(auth);
-				show("register");
-				setStatus("サインイン完了。必要ならこの端末をパスキー登録してください。", "ok");
+				// ここを直接遷移に変更（register 画面は経由しない）
+				gotoApp();
 			} catch (e) {
 				console.error(e);
 				setStatus("自動パスキーサインインに失敗しました。手動でお試しください。", "warn");
@@ -252,8 +252,7 @@
 			setStatus("パスキーでサインイン中…");
 			const auth = await signInWithPasskey($("rememberedUser").value.trim());
 			saveTokens(auth);
-			show("register");
-			setStatus("サインイン完了。必要ならこの端末をパスキー登録してください。", "ok");
+			gotoApp(); // 直遷移
 		} catch (e) { console.error(e); setStatus("サインインに失敗しました", "warn"); }
 		finally { $("btnPasskey").disabled = false; }
 	};
@@ -268,7 +267,7 @@
 			const r = await signInWithPassword(u, p);
 			if (r.auth) {
 				saveTokens(r.auth); localStorage.setItem("remember_username", u);
-				show("register"); setStatus("サインイン完了。必要ならこの端末をパスキー登録してください。", "ok");
+				gotoApp(); // 直遷移
 			} else if (r.challenge) {
 				show("newpw"); setStatus("新しいパスワードを設定してください。", "warn");
 				$("btnNewPw").onclick = async () => {
@@ -276,7 +275,7 @@
 						const newPw = $("inNewPw").value || ""; if (!newPw) { setStatus("新しいパスワードを入力してください。", "warn"); return; }
 						const auth = await respondNewPassword(r.challenge, newPw, u);
 						saveTokens(auth); localStorage.setItem("remember_username", u);
-						show("register"); setStatus("パスワードを更新しました。必要ならこの端末をパスキー登録してください。", "ok");
+						gotoApp(); // 直遷移
 					} catch (e) { console.error(e); setStatus("パスワード更新に失敗しました", "warn"); }
 				};
 			}
