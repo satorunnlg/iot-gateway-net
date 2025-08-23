@@ -149,7 +149,6 @@
 		}
 		if (pubKey.timeout) pubKey.timeout = Number(pubKey.timeout);
 
-		// 5) ブラウザでパスキー認証
 		const cred = await navigator.credentials.get({ publicKey: pubKey });
 		const authnJSON = {
 			id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
@@ -162,7 +161,6 @@
 			clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
 		};
 
-		// 6) WEB_AUTHN チャレンジに回答して最終トークンを受領
 		const resp = await cognito("RespondToAuthChallenge", {
 			ClientId: cfg.userPoolClientId,
 			Session: session,
@@ -227,12 +225,25 @@
 	if (state.remembered) {
 		$("rememberedUser").value = state.remembered;
 		show("passkey");
+		// --- 追加: 自動的にパスキー起動 ---
+		(async () => {
+			try {
+				setStatus("パスキー自動サインイン中…");
+				const auth = await signInWithPasskey(state.remembered.trim());
+				saveTokens(auth);
+				show("register");
+				setStatus("サインイン完了。必要ならこの端末をパスキー登録してください。", "ok");
+			} catch (e) {
+				console.error(e);
+				setStatus("自動パスキーサインインに失敗しました。手動でお試しください。", "warn");
+			}
+		})();
 	} else {
 		show("password");
 	}
 	$("switchToPw").onclick = () => show("password");
 
-	// パスキーサインイン
+	// パスキーサインイン（手動）
 	$("btnPasskey").onclick = async () => {
 		try {
 			$("btnPasskey").disabled = true;
