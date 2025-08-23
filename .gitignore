@@ -173,3 +173,5 @@ cython_debug/
 *.crt
 *.key
 sample/thing/cert/AmazonRootCA1.pem
+favicon1.png
+favicon2.png
