@@ -3,166 +3,153 @@
 
 <head>
 	<meta charset="utf-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<title>AMR 呼出し - Iot-gateway-net</title>
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>サインイン - AMR</title>
+	<link rel="icon" href="./assets/favicon.ico" />
 	<style>
 		body {
 			font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
 			margin: 0;
-			padding: 0;
-			display: flex;
-			justify-content: center;
-			align-items: center;
-			min-height: 100vh;
-			background: #f9fafb;
+			background: #f9fafb
 		}
 
-		.card {
-			width: 90%;
+		.wrap {
 			max-width: 560px;
+			margin: 5vh auto;
+			padding: 24px;
 			background: #fff;
 			border-radius: 16px;
-			box-shadow: 0 6px 16px rgba(0, 0, 0, .08);
-			padding: 20px;
+			box-shadow: 0 6px 16px rgba(0, 0, 0, .08)
 		}
 
 		h1 {
-			margin: 0 0 8px;
-			font-size: 1.4rem;
-			text-align: center;
+			margin: 0 0 4px;
+			font-size: 1.6rem;
+			text-align: center
 		}
 
 		.muted {
 			color: #666;
-			font-size: .9rem;
 			text-align: center;
-			margin-bottom: 12px;
+			margin-bottom: 16px
 		}
 
 		.row {
-			margin: 12px 0;
 			display: flex;
 			flex-direction: column;
 			gap: 8px;
+			margin: 12px 0
 		}
 
 		label {
-			font-weight: 600;
+			font-weight: 600
 		}
 
-		select,
+		input,
 		button {
 			padding: 12px;
 			font-size: 1rem;
 			border-radius: 10px;
-			border: 1px solid #d1d5db;
+			border: 1px solid #d1d5db
 		}
 
 		button.primary {
 			background: #2563eb;
 			color: #fff;
 			border-color: #2563eb;
-			cursor: pointer;
+			cursor: pointer
 		}
 
 		button.primary:disabled {
 			background: #9ca3af;
 			border-color: #9ca3af;
-			cursor: not-allowed;
+			cursor: not-allowed
 		}
 
-		.status {
-			font-weight: 700;
-			font-size: 1.2rem;
-			text-align: center;
-		}
-
-		.warn {
-			color: #b91c1c;
-		}
-
-		.ok {
-			color: #065f46;
-		}
-
-		.row.inline {
+		.inline {
 			flex-direction: row;
-			align-items: center;
-			gap: 12px;
+			gap: 8px;
+			align-items: center
 		}
 
 		.grow {
-			flex: 1;
-		}
-
-		.right {
-			text-align: right;
+			flex: 1
 		}
 
 		.small {
 			font-size: .85rem;
-			color: #555;
+			color: #555
 		}
 
-		@media (min-width: 640px) {
-			h1 {
-				font-size: 1.8rem;
-			}
+		.ok {
+			color: #065f46;
+			font-weight: 700
+		}
 
-			button {
-				font-size: 1.05rem;
-			}
+		.warn {
+			color: #b91c1c;
+			font-weight: 700
+		}
+
+		.link {
+			color: #2563eb;
+			cursor: pointer;
+			text-decoration: underline
+		}
+
+		.hidden {
+			display: none
 		}
 	</style>
 </head>
 
 <body>
-	<div class="card">
-		<h1>AMR 呼出し</h1>
-		<div class="muted">共有アカウント方式（Passkey）／ 東京リージョン</div>
+	<div class="wrap">
+		<h1>サインイン</h1>
+		<div class="muted">初回はメール＋パスワード／2回目以降はパスキー（端末登録済み）</div>
 
-		<div class="row">
-			<label>接続 / 認証</label>
-			<div id="authArea" class="row inline">
-				<button id="loginBtn" class="primary">サインイン</button>
-				<button id="registerBtn">この端末を登録</button>
-				<button id="logoutBtn">サインアウト</button>
-				<div id="authInfo" class="small grow right">未認証</div>
+		<!-- 2回目以降（パスキー） -->
+		<div id="passkeyPane" class="row hidden">
+			<label>パスキー（WebAuthn）でサインイン</label>
+			<div class="inline">
+				<input id="rememberedUser" class="grow" type="email" autocomplete="username" readonly />
+				<button id="btnPasskey" class="primary">パスキーでサインイン</button>
 			</div>
+			<div class="small">他の方法でサインインする場合は <span id="switchToPw" class="link">こちら</span></div>
 		</div>
 
-		<div class="row">
-			<label for="status">ステータス</label>
-			<div id="status" class="status">—</div>
-			<div id="hbInfo" class="small">HB: —</div>
+		<!-- 初回（メール/パスワード） -->
+		<div id="passwordPane" class="row">
+			<label>メール + パスワードでサインイン</label>
+			<input id="inUser" type="email" placeholder="メールアドレス" autocomplete="username" />
+			<input id="inPw" type="password" placeholder="パスワード" autocomplete="current-password" />
+			<button id="btnPassword" class="primary">サインイン</button>
+			<div class="small">※ 初回作成ユーザーは、この後に<strong>パスワード変更</strong>が必要になる場合があります。</div>
 		</div>
 
-		<div class="row inline">
-			<div class="grow">
-				<label for="dest">行先</label>
-				<select id="dest"></select>
-			</div>
-			<div>
-				<label>&nbsp;</label>
-				<button id="callBtn" class="primary" disabled>接続中...</button>
-			</div>
+		<!-- NEW_PASSWORD_REQUIRED 対応 -->
+		<div id="newPwPane" class="row hidden">
+			<label>パスワード変更が必要です</label>
+			<input id="inNewPw" type="password" placeholder="新しいパスワード" autocomplete="new-password" />
+			<button id="btnNewPw" class="primary">変更して続行</button>
+			<div class="small">ポリシーに合致する強度のパスワードを設定してください。</div>
 		</div>
 
-		<div class="row small">
-			初回のみ Hosted UI で Passkey 登録・サインインが必要です。以後は自動サインインされます。
+		<!-- ログイン後：パスキー登録（任意／推奨） -->
+		<div id="registerPane" class="row hidden">
+			<label>この端末をパスキー登録（推奨）</label>
+			<button id="btnRegister" class="primary">パスキーを登録</button>
+			<div class="small">登録後、次回からは生体認証などで入力レス・サインインできます。</div>
+			<button id="btnGotoApp" class="">AMR 操作画面へ進む</button>
 		</div>
+
+		<div id="status" class="small">—</div>
 	</div>
 
-	<!-- ライブラリ（CDN, UMD / ESM不使用） -->
-	<!-- AWS SDK v2（Cognito Identity, SigV4用ユーティリティ）-->
-	<script src="https://sdk.amazonaws.com/js/aws-sdk-2.1481.0.min.js" crossorigin="anonymous"></script>
-	<!-- Paho MQTT（WebSocket MQTTクライアント） -->
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/mqttws31.min.js" integrity=""
-		crossorigin="anonymous"></script>
-
-	<!-- アプリコード -->
+	<!-- 公開設定（region / pool 等：config.js をそのまま利用） -->
 	<script src="./config.js"></script>
-	<script src="./app.js"></script>
+	<!-- サインイン専用ロジック -->
+	<script src="./signin.js"></script>
 </body>
 
 </html>
