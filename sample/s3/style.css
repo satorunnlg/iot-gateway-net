@@ -1,0 +1,453 @@
+/**
+ * 役割: 全ページ共通のベースデザイン（タイポ/配色/レイアウト/コンポーネント/軽量リセット）
+ * 参照: README の「アーキテクチャ要件（配信/CSP）」、AWS設定手順書の「CloudFront 応答ヘッダー（CSP等）/キャッシュ方針」
+ * 注意: 外部フォントや外部CDNは使用しない（script/style-src 'self' 前提）。将来は版付きファイル（例: style.20250823.css）で長期キャッシュ。
+ */
+
+/* ====== CSS Variables (System Font / Color Scale) ====== */
+:root {
+	--font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+	--radius: 14px;
+	--shadow: 0 6px 24px rgba(0, 0, 0, .06), 0 2px 8px rgba(0, 0, 0, .04);
+
+	/* Light */
+	--bg: #f8fafc;
+	--panel: #ffffff;
+	--text: #0f172a;
+	--muted: #475569;
+	--line: #e2e8f0;
+	--brand: #2563eb;
+	--brand-2: #1d4ed8;
+	--accent: #0ea5e9;
+	--ok: #16a34a;
+	--warn: #f59e0b;
+	--danger: #dc2626;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0b1220;
+		--panel: #0f172a;
+		--text: #e2e8f0;
+		--muted: #94a3b8;
+		--line: #1f2a44;
+		--brand: #3b82f6;
+		--brand-2: #60a5fa;
+		--accent: #22d3ee;
+		--ok: #22c55e;
+		--warn: #fbbf24;
+		--danger: #ef4444;
+		--shadow: 0 10px 30px rgba(0, 0, 0, .35), 0 3px 10px rgba(0, 0, 0, .35);
+	}
+}
+
+/* ====== Reset-lite & base ====== */
+* {
+	box-sizing: border-box
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+	text-size-adjust: 100%
+}
+
+html,
+body {
+	height: 100%
+}
+
+body {
+	margin: 0;
+	min-height: 100dvh;
+	overflow: hidden;
+	/* 画面外スクロールを抑止（内部スクロールは .container で発生） */
+	font-family: var(--font-sans);
+	color: var(--text);
+	background:
+		radial-gradient(1200px 600px at 10% 0%, rgba(37, 99, 235, .08), transparent 45%),
+		radial-gradient(1200px 600px at 90% 0%, rgba(14, 165, 233, .08), transparent 45%),
+		var(--bg);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+a {
+	color: var(--brand);
+	text-decoration: none
+}
+
+a:hover {
+	text-decoration: underline
+}
+
+hr {
+	border: 0;
+	border-top: 1px solid var(--line);
+	margin: 24px 0
+}
+
+/* フォーム系の標準化（クラス未適用でも最低限の見栄えになるように） */
+input,
+select,
+button,
+textarea {
+	font: inherit;
+	color: inherit
+}
+
+:where(input, select, textarea) {
+	width: 100%;
+	padding: 10px 12px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: transparent;
+	outline: none;
+	transition: border-color .15s ease, box-shadow .15s ease
+}
+
+:where(input, select, textarea):focus {
+	border-color: var(--brand);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 24%, transparent)
+}
+
+/* ボタンのデフォルト */
+button {
+	appearance: none;
+	border: 0;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 10px 14px;
+	font-weight: 700;
+	border-radius: 12px;
+	line-height: 1;
+	background: #e2e8f0;
+	color: #0f172a;
+	transition: transform .02s ease, background .15s ease, opacity .15s ease;
+}
+
+button:hover {
+	opacity: .95
+}
+
+button:active {
+	transform: translateY(1px)
+}
+
+button:disabled {
+	opacity: .55;
+	cursor: not-allowed
+}
+
+/* 既存HTML互換（class="primary" を主要ボタンに） */
+button.primary,
+.primary {
+	background: linear-gradient(180deg, var(--brand), var(--brand-2));
+	color: #fff;
+	border: 0
+}
+
+/* ====== Layout（内部スクロール＆ヘッダ固定） ====== */
+.container {
+	width: min(1100px, 92%);
+	height: 100dvh;
+	/* 画面いっぱいを占有 */
+	margin: 0 auto;
+	/* 中央寄せ */
+	padding: 0 0 80px;
+	/* 下部の余白（フッタ代替の安全域） */
+	overflow: auto;
+	/* スクロールはコンテナ内だけで発生 */
+}
+
+.header {
+	position: sticky;
+	top: 0;
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 18px 0 14px;
+	margin: 0 0 16px;
+	background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 70%, transparent), color-mix(in srgb, var(--bg) 95%, transparent) 65%, transparent);
+	backdrop-filter: saturate(120%) blur(4px);
+	/* 対応ブラウザのみ視覚効果 */
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	font-weight: 700;
+	letter-spacing: .3px;
+	font-size: 18px
+}
+
+.brand-badge {
+	width: 36px;
+	height: 36px;
+	border-radius: 10px;
+	box-shadow: var(--shadow);
+	/* background: linear-gradient(135deg, var(--brand), var(--accent)); */
+	/* 画像を置く場合は以下を上書き（/assets/brand-badge.png を推奨） */
+	background: no-repeat center/cover url("./assets/badge.png");
+}
+
+.header-actions {
+	display: flex;
+	gap: 8px;
+	align-items: center
+}
+
+/* ====== Content wrappers used in pages ====== */
+.wrap {
+	display: grid;
+	gap: 16px
+}
+
+/* ====== Card ====== */
+.card {
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	box-shadow: var(--shadow);
+	padding: 20px;
+}
+
+.card+.card {
+	margin-top: 16px
+}
+
+.card-title {
+	font-weight: 700;
+	margin: 0 0 8px
+}
+
+.card-subtitle {
+	color: var(--muted);
+	margin: 0 0 14px;
+	font-size: 14px
+}
+
+/* ====== Rows / Inline form layout ====== */
+.row {
+	display: grid;
+	gap: 10px;
+	margin-bottom: 14px
+}
+
+.inline {
+	display: flex;
+	gap: 10px;
+	align-items: flex-end;
+	flex-wrap: wrap
+}
+
+.grow {
+	flex: 1 1 auto
+}
+
+/* ====== Text helpers ====== */
+.small {
+	font-size: 12px;
+	color: var(--muted)
+}
+
+.muted {
+	color: var(--muted)
+}
+
+.status {
+	font-weight: 700
+}
+
+/* ====== Badges / Status ====== */
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	border-radius: 999px;
+	padding: 6px 10px;
+	font-size: 12px;
+	font-weight: 700;
+	border: 1px solid var(--line);
+	background: color-mix(in srgb, var(--panel) 80%, transparent);
+}
+
+.dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%
+}
+
+.dot.ok {
+	background: var(--ok)
+}
+
+.dot.warn {
+	background: var(--warn)
+}
+
+.dot.danger {
+	background: var(--danger)
+}
+
+.dot.idle {
+	background: var(--muted)
+}
+
+/* ====== Optional button variants (for将来の置換) ====== */
+.btn {
+	/* 将来的に class="btn" を使う場合の互換 */
+	appearance: none;
+	border: 0;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 10px 14px;
+	font-weight: 700;
+	border-radius: 12px;
+	line-height: 1;
+	background: #e2e8f0;
+	color: #0f172a;
+	transition: transform .02s ease, background .15s ease, opacity .15s ease;
+}
+
+.btn:hover {
+	opacity: .95
+}
+
+.btn:active {
+	transform: translateY(1px)
+}
+
+.btn:disabled {
+	opacity: .55;
+	cursor: not-allowed
+}
+
+.btn-primary {
+	background: linear-gradient(180deg, var(--brand), var(--brand-2));
+	color: #fff
+}
+
+.btn-outline {
+	background: transparent;
+	color: var(--brand);
+	border: 1px solid var(--brand)
+}
+
+/* ====== Forms (classベース：段階的移行用) ====== */
+.form {
+	display: grid;
+	gap: 12px
+}
+
+.label {
+	font-weight: 600;
+	font-size: 13px;
+	color: var(--muted)
+}
+
+.input,
+.select {
+	width: 100%;
+	padding: 10px 12px;
+	background: transparent;
+	color: var(--text);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	outline: none;
+	transition: border-color .15s ease, box-shadow .15s ease
+}
+
+.input:focus,
+.select:focus {
+	border-color: var(--brand);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 24%, transparent)
+}
+
+.help {
+	color: var(--muted);
+	font-size: 12px
+}
+
+/* ====== Grid helpers ====== */
+.grid {
+	display: grid;
+	gap: 16px
+}
+
+.grid.two {
+	grid-template-columns: repeat(2, minmax(0, 1fr))
+}
+
+@media (max-width:900px) {
+	.grid.two {
+		grid-template-columns: 1fr
+	}
+}
+
+/* ====== Notice / Table ====== */
+.notice {
+	background: color-mix(in srgb, var(--brand) 7%, var(--panel));
+	border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--line));
+	padding: 10px 12px;
+	border-radius: 12px;
+	color: var(--text);
+}
+
+.table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 14px
+}
+
+.table th,
+.table td {
+	border-bottom: 1px solid var(--line);
+	padding: 10px 6px;
+	text-align: left
+}
+
+.table th {
+	color: var(--muted);
+	font-weight: 700
+}
+
+/* ====== Utilities ====== */
+.mt-8 {
+	margin-top: 8px
+}
+
+.mt-12 {
+	margin-top: 12px
+}
+
+.mt-16 {
+	margin-top: 16px
+}
+
+.mt-24 {
+	margin-top: 24px
+}
+
+.center {
+	display: flex;
+	align-items: center;
+	justify-content: center
+}
+
+.right {
+	display: flex;
+	justify-content: flex-end
+}
+
+.hidden {
+	display: none !important
+}

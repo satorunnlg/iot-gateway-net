@@ -6,150 +6,77 @@
 	<meta name="viewport" content="width=device-width,initial-scale=1" />
 	<title>サインイン - AMR</title>
 	<link rel="icon" href="./assets/favicon.ico" />
+	<link rel="stylesheet" href="style.css" />
 	<style>
-		body {
-			font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-			margin: 0;
-			background: #f9fafb
-		}
-
-		.wrap {
-			max-width: 560px;
-			margin: 5vh auto;
-			padding: 24px;
-			background: #fff;
-			border-radius: 16px;
-			box-shadow: 0 6px 16px rgba(0, 0, 0, .08)
-		}
-
-		h1 {
-			margin: 0 0 4px;
-			font-size: 1.6rem;
-			text-align: center
-		}
-
-		.muted {
-			color: #666;
-			text-align: center;
-			margin-bottom: 16px
-		}
-
-		.row {
-			display: flex;
-			flex-direction: column;
-			gap: 8px;
-			margin: 12px 0
-		}
-
-		label {
-			font-weight: 600
-		}
-
-		input,
-		button {
-			padding: 12px;
-			font-size: 1rem;
-			border-radius: 10px;
-			border: 1px solid #d1d5db
-		}
-
-		button.primary {
-			background: #2563eb;
-			color: #fff;
-			border-color: #2563eb;
-			cursor: pointer
-		}
-
-		button.primary:disabled {
-			background: #9ca3af;
-			border-color: #9ca3af;
-			cursor: not-allowed
-		}
-
-		.inline {
-			flex-direction: row;
-			gap: 8px;
-			align-items: center
-		}
-
-		.grow {
-			flex: 1
-		}
-
-		.small {
-			font-size: .85rem;
-			color: #555
-		}
-
-		.ok {
-			color: #065f46;
-			font-weight: 700
-		}
-
-		.warn {
-			color: #b91c1c;
-			font-weight: 700
-		}
-
-		.link {
-			color: #2563eb;
-			cursor: pointer;
-			text-decoration: underline
-		}
-
-		.hidden {
-			display: none
+		/* ページ固有: ロゴを中央に大きく表示 */
+		.logo-large {
+			display: block;
+			margin: 30px auto 20px;
+			max-width: 180px;
+			height: auto;
 		}
 	</style>
 </head>
 
 <body>
-	<div class="wrap">
-		<h1>サインイン</h1>
-		<div class="muted">初回はメール＋パスワード／2回目以降はパスキー（端末登録済み）</div>
-
-		<!-- 2回目以降（パスキー） -->
-		<div id="passkeyPane" class="row hidden">
-			<label>パスキー（WebAuthn）でサインイン</label>
-			<div class="inline">
-				<input id="rememberedUser" class="grow" type="email" autocomplete="username" readonly />
-				<button id="btnPasskey" class="primary">パスキーでサインイン</button>
+	<div class="container">
+		<header class="header">
+			<div class="brand">
+				<div class="brand-badge"></div> Iot-gateway-net
 			</div>
-			<div class="small">他の方法でサインインする場合は <span id="switchToPw" class="link">こちら</span></div>
-		</div>
+			<div class="header-actions">
+				<span class="badge"><span class="dot idle"></span>offline</span>
+			</div>
+		</header>
 
-		<!-- 初回（メール/パスワード） -->
-		<div id="passwordPane" class="row">
-			<label>メール + パスワードでサインイン</label>
-			<input id="inUser" type="email" placeholder="メールアドレス" autocomplete="username" />
-			<input id="inPw" type="password" placeholder="パスワード" autocomplete="current-password" />
-			<button id="btnPassword" class="primary">サインイン</button>
-			<div class="small">※ 初回作成ユーザーは、この後に<strong>パスワード変更</strong>が必要になる場合があります。</div>
-		</div>
+		<div class="card wrap">
+			<!-- ロゴをフォームの中央上部に配置 -->
+			<img src="./assets/badge.png" alt="App Logo" class="logo-large" />
 
-		<!-- NEW_PASSWORD_REQUIRED 対応 -->
-		<div id="newPwPane" class="row hidden">
-			<label>パスワード変更が必要です</label>
-			<input id="inNewPw" type="password" placeholder="新しいパスワード" autocomplete="new-password" />
-			<button id="btnNewPw" class="primary">変更して続行</button>
-			<div class="small">ポリシーに合致する強度のパスワードを設定してください。</div>
-		</div>
+			<h1 class="card-title">サインイン</h1>
+			<div class="card-subtitle">初回はメール＋パスワード／2回目以降はパスキー（端末登録済み）</div>
 
-		<!-- ログイン後：パスキー登録（任意／推奨） -->
-		<div id="registerPane" class="row hidden">
-			<label>この端末をパスキー登録（推奨）</label>
-			<button id="btnRegister" class="primary">パスキーを登録</button>
-			<div class="small">登録後、次回からは生体認証などで入力レス・サインインできます。</div>
-			<button id="btnGotoApp" class="">AMR 操作画面へ進む</button>
-		</div>
+			<!-- 2回目以降（パスキー） -->
+			<div id="passkeyPane" class="row hidden">
+				<label class="label">パスキー（WebAuthn）でサインイン</label>
+				<div class="inline">
+					<input id="rememberedUser" class="input grow" type="email" autocomplete="username" readonly />
+					<button id="btnPasskey" class="btn btn-primary">パスキーでサインイン</button>
+				</div>
+				<div class="small">他の方法でサインインする場合は <span id="switchToPw" class="link">こちら</span></div>
+			</div>
 
-		<div id="status" class="small">—</div>
+			<!-- 初回（メール/パスワード） -->
+			<div id="passwordPane" class="row">
+				<label class="label">メール + パスワードでサインイン</label>
+				<input id="inUser" class="input" type="email" placeholder="メールアドレス" autocomplete="username" />
+				<input id="inPw" class="input" type="password" placeholder="パスワード" autocomplete="current-password" />
+				<button id="btnPassword" class="btn btn-primary">サインイン</button>
+				<div class="small">※ 初回作成ユーザーは、この後に<strong>パスワード変更</strong>が必要になる場合があります。</div>
+			</div>
+
+			<!-- NEW_PASSWORD_REQUIRED 対応 -->
+			<div id="newPwPane" class="row hidden">
+				<label class="label">パスワード変更が必要です</label>
+				<input id="inNewPw" class="input" type="password" placeholder="新しいパスワード" autocomplete="new-password" />
+				<button id="btnNewPw" class="btn btn-primary">変更して続行</button>
+				<div class="small">ポリシーに合致する強度のパスワードを設定してください。</div>
+			</div>
+
+			<!-- ログイン後：パスキー登録（任意／推奨） -->
+			<div id="registerPane" class="row hidden">
+				<label class="label">この端末をパスキー登録（推奨）</label>
+				<button id="btnRegister" class="btn btn-primary">パスキーを登録</button>
+				<div class="small">登録後、次回からは生体認証などで入力レス・サインインできます。</div>
+				<button id="btnGotoApp" class="btn">AMR 操作画面へ進む</button>
+			</div>
+
+			<div id="status" class="small">—</div>
+		</div>
 	</div>
 
-	<!-- 公開設定（region / pool 等：config.js をそのまま利用） -->
-	<script src="./config.js"></script>
-	<!-- サインイン専用ロジック -->
-	<script src="./signin.js"></script>
+	<script src="config.js"></script>
+	<script src="signin.js"></script>
 </body>
 
 </html>

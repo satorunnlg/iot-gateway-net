@@ -1,3 +1,8 @@
+<!-- amr-control.html (UIレイヤ：AMR操作画面)
+  役割: 認証後のAMR操作UI。共通スタイルは style.css を使用。
+  参照: README の配信/CSP方針、手順書のCloudFront/キャッシュ（詳細は正資料を参照）
+  注意: サインアウトボタンの id は logoutBtn に統一（app.js のハンドラ参照）
+-->
 <!doctype html>
 <html lang="ja">
 
@@ -6,137 +11,61 @@
 	<meta name="viewport" content="width=device-width,initial-scale=1" />
 	<title>AMR 操作 - Iot-gateway-net</title>
 	<link rel="icon" href="./assets/favicon.ico" />
-	<style>
-		body {
-			font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-			margin: 0;
-			padding: 0;
-			display: flex;
-			justify-content: center;
-			align-items: center;
-			min-height: 100vh;
-			background: #f9fafb
-		}
-
-		.card {
-			width: 90%;
-			max-width: 720px;
-			background: #fff;
-			border-radius: 16px;
-			box-shadow: 0 6px 16px rgba(0, 0, 0, .08);
-			padding: 20px
-		}
-
-		h1 {
-			margin: 0 0 8px;
-			font-size: 1.6rem;
-			text-align: center
-		}
-
-		.muted {
-			color: #666;
-			font-size: .9rem;
-			text-align: center;
-			margin-bottom: 12px
-		}
-
-		.row {
-			margin: 12px 0;
-			display: flex;
-			flex-direction: column;
-			gap: 8px
-		}
-
-		label {
-			font-weight: 600
-		}
-
-		input,
-		select,
-		button {
-			padding: 12px;
-			font-size: 1rem;
-			border-radius: 10px;
-			border: 1px solid #d1d5db
-		}
-
-		button.primary {
-			background: #2563eb;
-			color: #fff;
-			border-color: #2563eb;
-			cursor: pointer
-		}
-
-		.status {
-			font-weight: 700;
-			font-size: 1.2rem;
-			text-align: center
-		}
-
-		.warn {
-			color: #b91c1c
-		}
-
-		.ok {
-			color: #065f46
-		}
-
-		.inline {
-			flex-direction: row;
-			align-items: center;
-			gap: 12px
-		}
-
-		.grow {
-			flex: 1
-		}
-
-		.small {
-			font-size: .85rem;
-			color: #555
-		}
-	</style>
+	<link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
-	<div class="card">
-		<h1>AMR 操作</h1>
-		<div class="muted">Cognito（IDプール）＋ IoT MQTT over WSS</div>
-
-		<div class="row">
-			<label>ステータス</label>
-			<div id="status" class="status">—</div>
-			<div id="hbInfo" class="small">HB: —</div>
-		</div>
-
-		<div class="row inline">
-			<div class="grow">
-				<label>行先</label>
-				<select id="dest"></select>
+	<div class="container">
+		<header class="header">
+			<div class="brand">
+				<div class="brand-badge"></div> AMR Control
 			</div>
-			<div>
-				<label>&nbsp;</label>
-				<button id="callBtn" class="primary" disabled>接続中...</button>
+			<div class="header-actions">
+				<span id="conn-badge" class="badge"><span class="dot idle"></span>offline</span>
+				<!-- ここに集約し、id を logoutBtn に統一 -->
+				<button id="logoutBtn" class="btn">サインアウト</button>
 			</div>
-		</div>
+		</header>
 
-		<div class="row inline">
-			<div id="authInfo" class="small grow">認証状態: 未確認</div>
-			<button id="logoutBtn">サインアウト</button>
-		</div>
+		<div class="card wrap">
+			<h1 class="card-title">AMR 操作</h1>
+			<div class="card-subtitle">Cognito（IDプール）＋ IoT MQTT over WSS</div>
 
-		<div class="row small">
-			ヒント：RP ID はサインイン画面（CloudFront FQDN）に設定済みである必要があります。
+			<div class="row">
+				<label class="label">ステータス</label>
+				<div id="status" class="status">—</div>
+				<div id="hbInfo" class="small">HB: —</div>
+			</div>
+
+			<div class="row inline">
+				<div class="grow">
+					<label class="label" for="dest">行先</label>
+					<select id="dest" class="select"></select>
+				</div>
+				<div>
+					<label class="label" style="visibility:hidden;">&nbsp;</label>
+					<button id="callBtn" class="btn btn-primary" disabled>接続中...</button>
+				</div>
+			</div>
+
+			<div class="row inline">
+				<div id="authInfo" class="small grow">認証状態: 未確認</div>
+				<!-- 下部サインアウト（重複）は削除 -->
+			</div>
+
+			<div class="row small">
+				ヒント：RP ID はサインイン画面（CloudFront FQDN）に設定済みである必要があります。
+			</div>
 		</div>
 	</div>
 
 	<!-- ライブラリ（セルフホスト UMD） -->
-	<script src="./vendor/aws-sdk-2.1481.0.min.js"></script>
-	<script src="./vendor/paho-mqtt-1.1.0.min.js"></script>
+	<script src="vendor/aws-sdk-2.1481.0.min.js"></script>
+	<script src="vendor/paho-mqtt-1.1.0.min.js"></script>
 
 	<!-- 設定／操作ロジック -->
-	<script src="./config.js"></script>
-	<script src="./app.js"></script>
+	<script src="config.js"></script>
+	<script src="app.js"></script>
 </body>
 
 </html>
