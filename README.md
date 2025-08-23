@@ -445,7 +445,7 @@ Content-Security-Policy:
 * サーバ機（Raspberry Pi）実装：Python+paho-mqtt、ハートビート/Shadow 更新、LWT
 * フロント（S3/CloudFront）実装：HTML+JS（ESM任意）、外部ライブラリはバージョン固定+SRI
 * `config.js` は公開識別子のみ（region, userPoolId, appClientId, identityPoolId, iotEndpoint）
-* 詳細は `sample/README.md` を参照してください。
+* 詳細は `sample/SampleREADME.md` を参照してください。
 
 ---
 
