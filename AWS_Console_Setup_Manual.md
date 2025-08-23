@@ -1,362 +1,318 @@
-# Iot-gateway-net 最終手順書（完全版 / 2025-08 / 日本語メニュー準拠）
+# AWS設定手順書
+## 目次
 
-> 本書は **CloudFront + WAF + S3（静的配信）** でカスタムUIを配信し、**Cognito（ユーザープール + IDプール）** と **IoT Core** を直接呼び出す構成を、**上から順番に実施すれば完了**するようにまとめたものです。
-> IoT 側は **Fleet Provisioning by claim**（ブートストラップ証明書で新規本番証明書を取得 → RegisterThing）を採用します。ブラウザは **パスキー（WebAuthn）** を用いた**カスタムUI**方式でサインインします。
->
-> ※ 画面ラベルは日本語UIに合わせていますが、併記の **（英語UI名）** と一致する項目を選べば他言語でも対応できます。
-
----
-
-## 0. 前提と命名
-
-* リージョン：**アジアパシフィック（東京） `ap-northeast-1`**
-* アカウントID：`ACCOUNT_ID`（以降この表記を置き換え）
-* 代表命名：
-
-  * Thing 名：`AMR-001`（量産時は `AMR-<serial>`）
-  * 本番ポリシー：`AMR-Prod-Policy`
-  * claim ポリシー：`AMR-Claim-Policy`
-  * フリートプロビジョニング・テンプレート：`amr-prod-template`
-  * プロビジョニング・ロールエイリアス：`amr-provisioning-role-alias`
-  * ブラウザ用 ID プールの認証ロール：`Cognito-IoTBrowserRole`
+* [0. 前提と完成像](#0-前提と完成像)
+* [1. 事前準備（ツール・前提リソース）](#1-事前準備ツール前提リソース)
+* [2. S3（静的サイト）を準備](#2-s3静的サイトを準備)
+* [3. CloudFront をS3にOACで接続し配信](#3-cloudfront-をs3にoacで接続し配信)
+* [4. CloudFront 応答ヘッダー（CSP等）とキャッシュ設計](#4-cloudfront-応答ヘッダーcsp等とキャッシュ設計)
+* [5. CloudFront（任意）独自ドメイン/証明書/ログ/無効化](#5-cloudfront任意独自ドメイン証明書ログ無効化)
+* [6. AWS WAF WebACL を作成し CloudFront にアタッチ](#6-aws-waf-webacl-を作成し-cloudfront-にアタッチ)
+* [7. Amazon Cognito: ユーザープール（パスキー対応の本丸）](#7-amazon-cognito-ユーザープールパスキー対応の本丸)
+* [8. Cognito アプリクライアント（選択式サインイン＝ALLOW\_USER\_AUTH）](#8-cognito-アプリクライアント選択式サインインallow_user_auth)
+* [9. （必要なら）ユーザー作成と初回パスワード確定](#9-必要ならユーザー作成と初回パスワード確定)
+* [10. Cognito IDプール（IoT 用のAWS認証を得る）](#10-cognito-idプールiot-用のaws認証を得る)
+* [11. AWS IoT Core（WebSocket/MQTT でブラウザ接続）](#11-aws-iot-corewebsocketmqtt-でブラウザ接続)
+* [12. フロントエンド配置と外部ライブラリの取り扱い](#12-フロントエンド配置と外部ライブラリの取り扱い)
+* [13. 運用ポイント（キャッシュ更新・無効化・ログ）](#13-運用ポイントキャッシュ更新無効化ログ)
+* [14. 仕上げ：check\_aws\_environment.py で環境検証](#14-仕上げcheck_aws_environmentpy-で環境検証)
 
 ---
 
-## 1. IoT Core（ポリシー → claim 証明書 → テンプレート → ロール）
+## 0. 前提と完成像
 
-> 左ナビ構成（日本語/英語）：**接続（Connect）／管理（Manage）／モニタリング（Monitor）／セキュリティ（Security）／設定（Settings）**。
+* **静的フロントエンド**を S3（バケット非公開）に置き、**CloudFront + OAC** 経由で配信。
+* **Cognito（ユーザープール）**で**パスキー（WebAuthn）**を使ったサインイン。**RP ID は“サードパーティドメイン”＝あなたの配信FQDN**（CloudFrontのドメインまたは独自ドメイン）を指定します。最新UIでは**Passkeys 画面で「サードパーティドメイン」を選択**してRP IDを入力する点が重要。([AWS ドキュメント][1])
+* \*\*アプリクライアントはパブリック（シークレット無し）**かつ**`ALLOW_USER_AUTH`（選択式サインイン）\*\*を有効化。([AWS ドキュメント][2])
+* **Cognito IDプール**でAWS認証（クレデンシャル）を発行し、**IoT Core**へ**MQTT over WSS**で接続。**IAM/Iotポリシー**で権限を最小化。([AWS ドキュメント][3])
+* CloudFront に **CSPやセキュリティヘッダー**を**レスポンスヘッダーポリシー**で付与。([AWS ドキュメント][4])
 
-### 1-1. 本番用 IoT ポリシー（Thing/トピック最小権限）
-
-1. **IoT Core** → 左ナビ **セキュリティ（Security）→ ポリシー（Policies）→ 作成（Create）**。
-2. 名前：`AMR-Prod-Policy`。
-3. **JSON** に以下を貼付（`ACCOUNT_ID` を置換）。Thingに紐付くクライアントIDのみ許可し、対象トピックを最小化します。
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Connect"],
-      "Resource": ["arn:aws:iot:ap-northeast-1:ACCOUNT_ID:client/${iot:Connection.Thing.ThingName}"],
-      "Condition": {"Bool": {"iot:Connection.Thing.IsAttached": "true"}}
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Publish", "iot:Receive"],
-      "Resource": [
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/amr/${iot:Connection.Thing.ThingName}/*",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/things/${iot:Connection.Thing.ThingName}/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Subscribe"],
-      "Resource": [
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/amr/${iot:Connection.Thing.ThingName}/*",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/things/${iot:Connection.Thing.ThingName}/*"
-      ]
-    }
-  ]
-}
-```
-
-> ヒント：`Publish/Receive` は `topic/…`、`Subscribe` は `topicfilter/…` の ARN を使います。
-
-### 1-2. ブートストラップ（claim）用 IoT ポリシー（更新専用トピック）
-
-> 目的：claim 証明書（20年）で **新しい本番鍵/証明書の作成** と **RegisterThing（provision）** を実行するための **MQTT トピック権限のみ** を付与します（制御プレーンAPI権限は不要）。
-
-1. **セキュリティ → ポリシー → 作成**。
-2. 名前：`AMR-Claim-Policy`。
-3. JSON（テンプレート名は後段 1-4 で作成するものと一致させます）：
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    { "Effect": "Allow", "Action": ["iot:Connect"], "Resource": ["*"] },
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Publish", "iot:Receive"],
-      "Resource": [
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/certificates/create/json",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/certificates/create/json/accepted",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/certificates/create/json/rejected",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/provisioning-templates/amr-prod-template/provision/json",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/provisioning-templates/amr-prod-template/provision/json/accepted",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/provisioning-templates/amr-prod-template/provision/json/rejected"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Subscribe"],
-      "Resource": [
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/certificates/create/json",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/certificates/create/json/*",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/provisioning-templates/amr-prod-template/provision/json",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/provisioning-templates/amr-prod-template/provision/json/*"
-      ]
-    }
-  ]
-}
-```
-
-> 注意：**publish する前に受信トピックへ Subscribe** しておきます（`…/accepted|rejected` を取りこぼさない）。
-
-### 1-3. claim 証明書（20年）の登録とポリシー付与
-
-1. **セキュリティ → 証明書（Certificates）→ 登録/作成**。
-
-   * 既存の `claim.crt/claim.key` がある場合：\*\*「デバイス証明書の登録（Register a device certificate）」\*\*でアップロード。
-   * 新規作成する場合：\*\*「ワンクリック証明書の作成（Create certificate）」\*\*で作成しダウンロード（安全に保管）。
-2. 証明書詳細 → **アクション → ポリシーのアタッチ（Attach policy）** → `AMR-Claim-Policy` を付与。
-3. **Thing へのアタッチは不要**（claim は更新専用運用）。
-
-### 1-4. フリートプロビジョニング・テンプレートの作成（ウィザード）
-
-> メニュー導線：**接続（Connect）→ 複数のデバイスの接続（Connect many devices）→ Provisioning templates → Create provisioning template → 「クレーム証明書を使用したデバイスのプロビジョニング（Provisioning devices with a claim certificate）」**。
-
-ウィザード入力：
-
-* **Describe provisioning template**
-
-  * ステータス：`Active`
-  * テンプレート名：`amr-prod-template`
-  * 説明：任意
-* **Provisioning method**：クレーム証明書を使用した… を選択
-* **Configure resources and permissions**（テンプレート本文）
-
-  * **IoT ポリシーのアタッチ**：`AMR-Prod-Policy`
-  * **Thing 作成**：名前規則 `AMR-{serial}`（属性やグループは要件に応じて指定）
-  * **（任意）事前プロビジョニングフック**：検証用 Lambda を指定可能
-* **Create provisioning role and role alias**：**ロールエイリアス** `amr-provisioning-role-alias` と、信頼先 `iot.amazonaws.com` の **IAMロール**（`iot:CreateThing`, `iot:AttachThingPrincipal`, `iot:AttachPolicy`, `iot:DescribeCertificate`, `iot:UpdateCertificate` など）をウィザードで作成
-* **Review and create** → 作成
-
-> 作成後、`$aws/provisioning-templates/amr-prod-template/provision/json` などのトピックが有効になります。
+> 以降は **すべて手動**の操作手順です。CLI 併記部分はミスなく一気に設定したい時に使えます。
 
 ---
 
-## 2. デバイス側の動作テスト（claim → 新本番証明書 → RegisterThing）
+## 1. 事前準備（ツール・前提リソース）
 
-> 以降はテスト端末で実施します。**publish 前に必ず `…/accepted|rejected` へ Subscribe** してください。
+1. 管理者権限の AWS アカウント。リージョンは\*\*東京（ap-northeast-1）\*\*想定。
+2. **AWS CLI v2**（WindowsはMSIで導入/更新）。**WebAuthn設定のCLIオプションは v2 で利用可能**。([AWS ドキュメント][5])
 
-1. **エンドポイントの確認**：左ナビ **接続 → ドメイン設定（Domain configurations）** → **デバイスデータエンドポイント**（`xxxxx-ats.iot.ap-northeast-1.amazonaws.com`）を控える。
-2. **Subscribe**：
+   * `aws --version` で v2 を確認。
+3. **証明書**（独自ドメインをCloudFrontに設定する場合）
 
-   * `$aws/certificates/create/json/accepted|rejected`
-   * `$aws/provisioning-templates/amr-prod-template/provision/json/accepted|rejected`
-3. **CreateKeysAndCertificate**：空ペイロードで **`$aws/certificates/create/json` に Publish**。受領ペイロードに `certificatePem / privateKey / certificateOwnershipToken`。
-4. **RegisterThing（provision）**：
-
-   * **Publish** → `$aws/provisioning-templates/amr-prod-template/provision/json`
-   * 例ペイロード：
-
-```json
-{
-  "certificateOwnershipToken": "<token-from-step3>",
-  "parameters": {"serial": "001"}
-}
-```
-
-5. `accepted` で `thingName` を受領。**新・本番証明書で再接続**し、`amr/AMR-001/*` 等へ Publish/Subscribe を確認。
-
-> 失敗時の確認ポイント：テンプレート名、ロールエイリアスとIAMロール権限、ポリシーARN（`topic` と `topicfilter` の取り違い）、先に Subscribe 済みか。
+   * CloudFrontに割り当てる**ACM証明書は必ず us-east-1**で発行/インポート。([AWS ドキュメント][6])
 
 ---
 
-## 3. Cognito（カスタムUIでパスキー／IDプールでAWS資格情報）
+## 2. S3（静的サイト）を準備
 
-> ここでは **マネージドログインは使わず**、**ユーザープールAPI**を直接呼ぶ前提です（“選択式サインイン”＝`USER_AUTH` フロー）。
+1. バケット作成（例：`my-static-site-bucket`）
 
-### 3-1. ユーザープール（パスキー有効化）
-
-1. **Cognito** → 対象 **ユーザープール** を開く。
-2. 左メニュー **認証 → サインイン**：
-
-   * **「選択式サインイン（Choice-based）」** を有効化。
-   * **パスキー（WebAuthn）** を有効化（RP ID は \*\*ユーザープールドメイン（推奨：カスタムドメイン）\*\*と一致させる）。
-3. 左メニュー **アプリケーションクライアント**：
-
-   * 対象クライアントの **認証フロー**で **サインイン方法を選択（ALLOW\_USER\_AUTH）** を有効化。
-   * クライアントは **シークレットなし（public client）** を使用。
-
-> 注：Cognito の WebAuthn は **チャレンジ開始前に `USERNAME` が必須**です。初回のみユーザー名（メール/電話/任意ID）を入力 → 以後は**ローカル保存して自動投入**する設計にします。
-
-### 3-2. パスキー登録API（初回サインイン直後）
-
-* **StartWebAuthnRegistration**（アクセストークンで呼出）→ `PublicKeyCreationOptions` を受領
-* ブラウザで `navigator.credentials.create({ publicKey })` を実行
-* **CompleteWebAuthnRegistration** に結果を送信して登録完了
-
-### 3-3. パスキーでサインイン（カスタムUI）
-
-1. **InitiateAuth（USER\_AUTH）** に `USERNAME` と `PREFERRED_CHALLENGE=WEB_AUTHN` を指定して呼び出し、`ChallengeName=WEB_AUTHN` と `CredentialRequestOptions` 相当を受領。
-2. ブラウザで `navigator.credentials.get({ publicKey, mediation: 'conditional' })`。
-3. **RespondToAuthChallenge（WEB\_AUTHN）** に結果と `USERNAME` を送信し、ID/Access/Refresh トークンを取得。
-4. 初回で入力した `USERNAME` は端末ローカルに保存し、**次回以降は画面表示直後に（保存済みの）`USERNAME` を使って 1→2→3 を自動開始**します（体感“ユーザー名入力なし”）。
-
-### 3-4. ID プールで AWS 資格情報（IoT 用）を取得
-
-1. **Cognito → ID プール（Identity pools）** → **ID プールを作成**。
-2. **ID プロバイダー**に上記ユーザープールを関連付け。
-3. **認証済みロール**（例：`Cognito-IoTBrowserRole`）に **IoT 最小権限** を付与（clientId とトピックを厳密に）。
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Connect"],
-      "Resource": ["arn:aws:iot:ap-northeast-1:ACCOUNT_ID:client/${cognito-identity.amazonaws.com:sub}-*"],
-      "Condition": {"StringLike": {"iot:ClientId": "${cognito-identity.amazonaws.com:sub}-*"}}
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Subscribe"],
-      "Resource": [
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/amr/AMR-001/*",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/things/AMR-001/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Publish", "iot:Receive"],
-      "Resource": [
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/amr/AMR-001/*",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/things/AMR-001/*"
-      ]
-    }
-  ]
-}
-```
+   * **ブロックパブリックアクセスはON（公開しない）**。
+2. 静的コンテンツ（`index.html` / `app.js` / `config.js` など）をアップロード。
+3. **コンテンツタイプ**（`text/html`, `text/javascript`, `text/css`, `image/x-icon` など）を適切に設定。
+4. **公開はCloudFront経由のみ**にするため、後で**OAC**を設定して**S3バケットポリシーをCloudFrontのみに許可**します。([AWS ドキュメント][7])
 
 ---
 
-## 4. フロントエンド配信（S3 + CloudFront + OAC + WAF / CSP）
+## 3. CloudFront をS3にOACで接続し配信
 
-> 追加のサーバ（API Gateway / Lambda）は不要。**静的配信**のみで成立します。
+1. **ディストリビューション作成**
 
-### 4-1. S3 バケット
+   * **オリジン**＝S3 バケット（**ウェブサイトエンドポイントは使わない**。通常のバケットエンドポイントでOK。OACに必須）。([AWS ドキュメント][7])
+   * **OAC（Origin Access Control）**を新規作成してこのオリジンに割り当て。後で自動提案される**S3バケットポリシー**（`AWS:SourceArn` がこのディストリビューション）を適用。([AWS ドキュメント][7])
+   * **デフォルトビヘイビア**
 
-* 静的サイト用バケットを作成。**パブリックアクセスはすべてブロック**（アカウント既定を推奨）。
-
-### 4-2. CloudFront ディストリビューション + OAC
-
-1. **CloudFront → ディストリビューション作成**。オリジンは S3 バケットを指定。
-2. **オリジンアクセスコントロール（OAC）** を作成してオリジンに関連付け。
-3. 案内に従って **S3 バケットポリシー**へ OAC を許可（テンプレ自動挿入）。
-
-### 4-3. WAF（推奨）
-
-* CloudFront ディストリビューションに **WAF（Web ACL）** をアタッチ。まずは **マネージドルール**をカウント→調整→ブロックへ切替。
-
-### 4-4. CSP（Content-Security-Policy）
-
-* `connect-src` に **Cognito と IoT** のドメインを明示許可。例：
-
-```
-Content-Security-Policy:
-  default-src 'self';
-  script-src 'self';
-  connect-src 'self' https://cognito-idp.ap-northeast-1.amazonaws.com https://cognito-identity.ap-northeast-1.amazonaws.com wss://*.iot.ap-northeast-1.amazonaws.com;
-  frame-ancestors 'none';
-  object-src 'none';
-```
+     * Viewer protocol policy: Redirect HTTP to HTTPS
+     * Allowed HTTP methods: GET, HEAD（必要に応じてOPTIONS）
+     * **キャッシュポリシー**：後述（HTMLは短/0秒、アセットは長期）
+     * **オリジンリクエストポリシー**：後述（必要なヘッダ/クエリのみ）([AWS ドキュメント][8])
+   * **Default root object**：`index.html` を設定。ルートアクセス `/` で `index.html` を返します。([AWS ドキュメント][9])
+2. （任意）\*\*ログ（Standard logging v2）\*\*を有効化して CloudWatch Logs / Firehose / S3 に配送。([AWS ドキュメント][10])
 
 ---
 
-## 5. ブラウザ実装（最小骨子）
+## 4. CloudFront 応答ヘッダー（CSP等）とキャッシュ設計
 
-> すべて **フロントのみ（JS）** で完結します。クレデンシャルやシークレットはフロントに埋め込まない設計にします。
+### 4.1 応答ヘッダー（Response Headers Policy）
 
-### 5-1. 構成ファイル `config.js`（例）
+* **Policies → Create response headers policy** から以下のようなセキュリティヘッダーを追加：
 
-```js
-export const region = 'ap-northeast-1';
-export const userPoolId = 'ap-northeast-1_XXXXXXXXX';
-export const appClientId = 'xxxxxxxxxxxxxxxxxxxxxxxxxx'; // secret なし
-export const idPoolId = 'ap-northeast-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';
-export const iotEndpoint = 'xxxxx-ats.iot.ap-northeast-1.amazonaws.com';
-```
+  * `Content-Security-Policy`（例）
 
-### 5-2. サインイン（パスキー）→ 資格情報 → IoT へ接続（擬似コード）
+    ```
+    default-src 'self';
+    connect-src 'self' https://cognito-idp.ap-northeast-1.amazonaws.com wss://<あなたのIoT-ATSエンドポイント>;
+    script-src 'self';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data:;
+    frame-ancestors 'none';
+    base-uri 'self';
+    object-src 'none';
+    ```
 
-```js
-// 1) 初回のみユーザー名を入力して保存
-const username = loadOrAskAndPersistUsername();
+    ※ 外部CDNを使わない前提（後述の[12](#12-フロントエンド配置と外部ライブラリの取り扱い)参照）。
+  * `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
+  * `X-Content-Type-Options: nosniff`
+  * `X-Frame-Options: DENY`
+  * `Referrer-Policy: no-referrer`
+    CloudFront の**レスポンスヘッダーポリシー**で安全に付与できます。([AWS ドキュメント][4], [Repost][11])
 
-// 2) InitiateAuth(USER_AUTH) で WEB_AUTHN を要求
-const init = await callInitiateAuth({ username, preferredChallenge: 'WEB_AUTHN' });
+### 4.2 キャッシュ方針（Cache Policy / Origin Request Policy）
 
-// 3) WebAuthn（Conditional UI 対応）
-const options = toPublicKeyCredentialRequestOptions(init.challengeParams);
-const assertion = await navigator.credentials.get({ publicKey: options, mediation: 'conditional' });
+* **HTML（index.html等）：短命 or 0秒**
 
-// 4) RespondToAuthChallenge でトークン入手
-const tokens = await callRespondToAuthChallenge({ username, assertion, session: init.session });
+  * **Minimum/Default/Maximum TTL を 0** にして**常にオリジン確認**（または `Cache-Control: no-store` を付与）。([AWS CLI][12], [Repost][13])
+* **静的アセット（.js/.css/画像）：長期キャッシュ**
 
-// 5) ID プールで AWS 資格情報
-const creds = await getAwsCredentialsFromIdPool(tokens.idToken);
-
-// 6) IoT Device SDK (browser) で SigV4 WSS 接続
-const mqtt = await connectIotOverWss({ endpoint: iotEndpoint, region, credentials: creds });
-```
-
----
-
-## 6. 運用・監視（推奨）
-
-* **Device Defender（Detect）**：異常メッセージ量・接続異常などの挙動を検知 → アラーム。
-* **ミティゲーション**：違反時に **「証明書を無効化」** や **「デフォルトポリシーに差し替え」** を自動実行するアクションを紐付け（暴走端末の即時隔離）。
-* **証明書運用**：通常は **本番（1年）**。期限切れ・失効時は **claim（20年）** で接続 → `CreateKeysAndCertificate` → `RegisterThing` → 新本番証明書へ切替 → 旧本番を INACTIVE/Detach。
+  * ファイル名に**ハッシュ版管理**（`app.abcd1234.js`）を推奨。`Cache-Control: public, max-age=31536000, immutable`。
+* **Origin Request Policy** は**キャッシュキー**（Cache Policy）と連携して、**必要なヘッダ/クエリ/クッキーのみ**をオリジンへ。キャッシュヒット率に効きます。([AWS ドキュメント][8])
 
 ---
 
-## 7. トラブルシュート
+## 5. CloudFront（任意）独自ドメイン/証明書/ログ/無効化
 
-* **claim でレスポンスが来ない**：先に `…/accepted|rejected` へ Subscribe 済みか／トピックの `json`/`cbor` が一致しているか。
-* **provision が rejected**：テンプレート名、ロールエイリアス、IAM ロール権限（`AttachPolicy`/`AttachThingPrincipal` 等）、ポリシーの `topic`/`topicfilter` を再確認。
-* **ブラウザ接続が 403**：ID プールのロール（`clientId` 制限と対象トピック範囲）、Cognito ドメインと RP ID の一致、WSS のエンドポイント名を確認。
-* **CloudFront 経由で 403**：OAC を S3 に正しく関連付け／S3 は**パブリックブロックを維持**。
+* **独自ドメイン**を使う場合は、**ACM 証明書を us-east-1 で発行/インポート**してディストリビューションに割り当て。Route53 などでCNAMEを張る。([AWS ドキュメント][6])
+* **標準ログ v2**は前述のとおり有効化可能。([AWS ドキュメント][10])
+* **無効化（Invalidation）**
 
----
-
-## 付録 A：OpenSSL（claim：自己署名 20 年 の例）
-
-```bash
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout claim.key -out claim.crt \
-  -subj "/CN=device-claim" -days 7300
-```
-
-* 端末ごとに個別の claim を推奨（漏洩時の影響最小化）。
-
-## 付録 B：ディレクトリ構成（推奨）
-
-```
-Iot-gateway-net/
-├─ README.md
-├─ AWS_Console_Setup_Manual.md   # 本ドキュメント
-├─ app/
-│  ├─ index.html
-│  ├─ app.js
-│  └─ config.js
-└─ sample/
-   ├─ thing/
-   │  ├─ client.py
-   │  └─ certs/
-   └─ README.md
-```
-
-## 付録 C：ポリシーの設計メモ
-
-* `iot:Connection.Thing.ThingName` 等の **ポリシー変数**で、**Thing連動の最小権限**を構成。
-* `iot:DomainName` を `Connect` 条件に追加し、**特定の IoT データエンドポイント**のみに接続を限定するのも有効。
-* `Publish/Receive` は `topic/…`、`Subscribe` は `topicfilter/…` を使い分け。
+  * 更新時は `/*` や `/index.html` を無効化。**ワイルドカードは末尾のみ**有効。([AWS ドキュメント][14])
 
 ---
 
-> 以上で、**上から順に進めれば** IoT 側のフリートプロビジョニング（claim）と、ブラウザのパスキー認証 + IoT 直結（SigV4 WSS）が構築できます。追加のサーバは不要です。
+## 6. AWS WAF WebACL を作成し CloudFront にアタッチ
+
+1. \*\*WebACL（グローバル）\*\*を作成し、**CloudFront ディストリビューション**に関連付け。
+2. **AWS Managed Rules（推奨）**
+
+   * **Core rule set (CRS)**、**Known bad inputs**、**Amazon IP reputation list** などのベースラインを有効化。([AWS ドキュメント][15])
+3. **Rate-based rule（しきい値レート制限）**
+
+   * 評価ウィンドウは **1/2/5/10 分**から選択（**既定は5分**）。軽いDDoSやクローリング対策に有効。([AWS ドキュメント][16])
+
+---
+
+## 7. Amazon Cognito: ユーザープール（パスキー対応の本丸）
+
+> **最新UIの誘導**：
+> コンソール → **Cognito** → **ユーザープール** →（対象プール）→ **認証（Authentication / サインイン設定）** → **Passkeys（パスキー）**。
+> ここで **「サードパーティドメイン」** を選んで **RP ID にあなたの配信FQDN**（例：`dg029bjh15kpm.cloudfront.net` または独自FQDN）を入力。これが**今回ハマりどころ**でした。([AWS ドキュメント][1])
+
+1. **ユーザープール新規作成**（既存でも可）
+
+   * サインインで使う識別子：**ユーザー名**（またはメール）
+   * ユーザー属性：必要に応じて Email を必須など
+2. **Passkeys（WebAuthn）設定**
+
+   * **Relying party（RP）**＝**あなたの配信FQDN**
+   * UI で **「サードパーティドメイン」** を選択 → **FQDN を入力**
+   * **User Verification**：`required` を推奨（ブラウザ側で生体認証等が必須）。
+   * **注意**：**カスタムドメインをユーザープールに設定している場合、RP ID はその**カスタムドメインに制約されるケースがある**ため、**プレフィックスドメインをRPにしたい時は「サードパーティドメイン」にFQDNを入力**する、というのが**最新仕様\*\*です。([AWS ドキュメント][1])
+3. **CLI での設定確認/変更**（必要時）
+
+   * `set-user-pool-mfa-config` の `--web-authn-configuration` で **RP ID と検証レベル**を設定可能（CLI v2）。([AWS ドキュメント][5])
+4. **注意（PSL）**：RPに**パブリックサフィックス（PSL）**は指定不可（`example.co.jp` のような**TLD/レジストリ扱いドメイン**はNG）。**自分が所有するFQDN**を使う。([AWS ドキュメント][17])
+
+---
+
+## 8. Cognito アプリクライアント（選択式サインイン＝ALLOW\_USER\_AUTH）
+
+1. **アプリクライアント**（Applications → App clients）を作成/編集
+
+   * **パブリッククライアント（シークレット無し）**
+   * **Authentication flows**：**Choice-based sign-in: `ALLOW_USER_AUTH`** を有効化。
+
+     * 併用するなら `ALLOW_USER_SRP_AUTH` / `ALLOW_USER_PASSWORD_AUTH` / `ALLOW_REFRESH_TOKEN_AUTH` も追加。([AWS ドキュメント][2])
+2. **Hosted UI を使わない**（カスタムUI）場合
+
+   * ドメイン設定は必須ではありません（この手順書では**自前UI**前提）。
+3. **APIの動作上の注意**
+
+   * `InitiateAuth`/`RespondToAuthChallenge` は**パスキー（`WEB_AUTHN`）**を含む**選択式**で動く。クライアントにシークレットがある場合は\*\*`SECRET_HASH` が必須\*\*になるので、\*\*ブラウザ用は“シークレット無し”\*\*が鉄則。([AWS ドキュメント][18])
+
+---
+
+## 9. （必要なら）ユーザー作成と初回パスワード確定
+
+* 管理者がユーザーを作った直後は **`FORCE_CHANGE_PASSWORD`**。**初回ログインで新パスワード**を求められるか、**管理者が恒久パスワードに変更**して即ログイン可能にできます。([sdk.amazonaws.com][19])
+
+  * 例：`admin-set-user-password --permanent` で確定。
+* その後、**アプリUIからパスキー登録**（`StartWebAuthnRegistration` → `CompleteWebAuthnRegistration`）で**信頼済みデバイス**を作るのが一般的です。([AWS ドキュメント][20])
+
+---
+
+## 10. Cognito IDプール（IoT 用のAWS認証を得る）
+
+> 目的：**Webブラウザ**で**MQTT over WSS**に接続するための**一時的なAWSクレデンシャル**を発行。
+
+1. **IDプール作成**（Federated Identities）
+
+   * 認証プロバイダに **User Pool** を追加：
+     `ProviderName = cognito-idp.<region>.amazonaws.com/<UserPoolId>` / `ClientId = <AppClientId>`
+2. **ロール設定**
+
+   * **Authenticated role**（例：`Cognito-IoTBrowserRole`）を設定。
+3. **ロールにポリシー付与（最小権限）**
+
+   * 例：**IoT への接続/購読/発行/受信**を必要なトピックにだけ許可（`iot:Connect`, `iot:Subscribe`, `iot:Publish`, `iot:Receive`）。
+   * **IAM と IoT ポリシーの両方で最小権限**を与える設計が推奨（両方の合算で**最小権限**が適用されます）。([AWS ドキュメント][21])
+
+---
+
+## 11. AWS IoT Core（WebSocket/MQTT でブラウザ接続）
+
+1. **エンドポイント**の取得
+
+   * CLI: `aws iot describe-endpoint --endpoint-type iot:Data-ATS`
+   * 応答 `endpointAddress` を **WSSのホスト**として使います（`*-ats.iot.<region>.amazonaws.com`）。**このAPIには `iot:DescribeEndpoint` 権限**が必要。([AWS ドキュメント][22])
+2. **プロトコル**
+
+   * ブラウザ→**MQTT over WSS**（443/TLS）で接続。([AWS ドキュメント][3])
+3. **認可**
+
+   * クレデンシャルは **Cognito IDプール**から取得（`GetId`/`GetCredentialsForIdentity`）→ SigV4 署名で接続。
+   * **IAM/Iotポリシー**で許可された**トピックとアクションのみ**が通ります。([AWS ドキュメント][23])
+
+---
+
+## 12. フロントエンド配置と外部ライブラリの取り扱い
+
+* **スクリプトは極力セルフホスト**にしてください（S3→CloudFront配信）。CDN由来の**CORSやアクセス制限**で読み込めない事象を避けます（先日の `sdk.amazonaws.com` / `cdnjs` 事象）。
+* **CSP** の `script-src 'self'` 前提で、AWS SDK for JS（必要部分だけ）や MQTT クライアントなどを\*\*`/vendor/`\*\*に置きます。
+* **`favicon.ico`** は `assets/favicon.ico` で配置し、**Content-Type: image/x-icon** を付与（403/404 回避のため）。
+
+---
+
+## 13. 運用ポイント（キャッシュ更新・無効化・ログ）
+
+* **HTMLは0秒キャッシュ**＋**`/index.html`（または `/*`）の無効化**で即反映。([AWS ドキュメント][14])
+* **アセットは長期キャッシュ**＋**ファイル名にハッシュ**でキャッシュ破棄。
+* \*\*ログ（標準ログ v2）\*\*は CloudWatch Logs / Firehose / S3 へ。可視化や監査に活用。([AWS ドキュメント][10])
+
+---
+
+## 14. 仕上げ：check\_aws\_environment.py で環境検証
+
+> すでに共有した `.env` 連携版（`python-dotenv`）を **`check_aws_environment.py`** という名前で保存している前提。
+
+1. 依存導入
+
+```powershell
+pip install boto3 python-dotenv
+```
+
+2. `.env` をプロジェクト直下に配置（例）
+
+```env
+AWS_PROFILE=default
+AWS_REGION=ap-northeast-1
+
+COGNITO_USER_POOL_ID=ap-northeast-1_XXXXXXXXX
+COGNITO_APP_CLIENT_ID=yyyyyyyyyyyyyyyyyyyyyyyyyy      # ← IDのみ。末尾にコメントを入れない
+COGNITO_USERNAME=org-operator
+
+COGNITO_USER_POOL_DOMAIN=           # カスタムUIのみなら空でOK
+COGNITO_IDENTITY_POOL_ID=ap-northeast-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+S3_BUCKET=my-static-site-bucket
+S3_FAVICON_KEY=assets/favicon.ico
+```
+
+3. 実行
+
+```powershell
+python .\check_aws_environment.py
+```
+
+**PASS になるべき要点**
+
+* **Cognito: WebAuthn (RP ID / UserVerification)** … **RP ID** に **CloudFront/独自FQDN** が表示（`UserVerification=required` 推奨）。([AWS ドキュメント][5])
+* **App Client: `ALLOW_USER_AUTH` & Secretなし**（シークレット付きにするとブラウザから `SECRET_HASH` 必須で失敗）。([AWS ドキュメント][2])
+* **User: org-operator** … `Enabled & CONFIRMED`（新規作成直後は `FORCE_CHANGE_PASSWORD`。`admin-set-user-password --permanent` で確定可能）。([sdk.amazonaws.com][19])
+* **Identity Pool** … `ProviderName=cognito-idp.<region>.amazonaws.com/<UserPoolId>` に **AppClientId** が一致。
+* **S3 favicon** … `image/x-icon` などが付与されて存在。
+
+---
+
+### 参考（主要ドキュメント）
+
+* **WebAuthn 設定（RP ID/第三者ドメイン）**：ユーザープールドメインとRPの関係／第三者ドメインの入力方法。([AWS ドキュメント][1])
+* **WebAuthnConfigurationType**（RP IDと検証レベルのAPI仕様）。([AWS ドキュメント][24])
+* **Passkeys と RP ID（PSL不可／自ドメイン使用）**。([AWS ドキュメント][17])
+* **CLI: set-user-pool-mfa-config（WebAuthn設定をCLIで）**。([AWS ドキュメント][5])
+* \*\*選択式サインイン（ALLOW\_USER\_AUTH）\*\*の有効化と位置（App clients → Authentication flows）。([AWS ドキュメント][2])
+* **InitiateAuth の `WEB_AUTHN` チャレンジ／SECRET\_HASH の注意**。([AWS ドキュメント][18])
+* **FORCE\_CHANGE\_PASSWORD → CONFIRMED の流れ**。([sdk.amazonaws.com][19])
+* **CloudFront と OAC（S3 私有＋配信）**。([AWS ドキュメント][7])
+* **CloudFront 応答ヘッダー（CSPなど）**。([AWS ドキュメント][4])
+* **ACM 証明書は us-east-1（CloudFront用）**。([AWS ドキュメント][6])
+* **Default Root Object** 設定。([AWS ドキュメント][9])
+* **WAF マネージドルール/レート制限**。([AWS ドキュメント][15])
+* **IoT MQTT over WSS と DescribeEndpoint**。([AWS ドキュメント][3])
+* **Cognito × IoT のポリシー例／最小権限**。([AWS ドキュメント][21])
+
+---
+
+[1]: https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-assign-domain.html?utm_source=chatgpt.com "Configuring a user pool domain - Amazon Cognito"
+[2]: https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-authentication-flow-methods.html?utm_source=chatgpt.com "Authentication flows - Amazon Cognito - AWS Documentation"
+[3]: https://docs.aws.amazon.com/iot/latest/developerguide/protocols.html?utm_source=chatgpt.com "Device communication protocols - AWS IoT Core"
+[4]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/creating-response-headers-policies.html?utm_source=chatgpt.com "Create response headers policies - Amazon CloudFront"
+[5]: https://docs.aws.amazon.com/cli/latest/reference/cognito-idp/set-user-pool-mfa-config.html?utm_source=chatgpt.com "set-user-pool-mfa-config — AWS CLI 2.28.13 Command Reference"
+[6]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html?utm_source=chatgpt.com "Requirements for using SSL/TLS certificates with CloudFront"
+[7]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html?utm_source=chatgpt.com "Restrict access to an Amazon S3 origin - Amazon CloudFront"
+[8]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-how-origin-request-policies-and-cache-policies-work-together.html?utm_source=chatgpt.com "Understand how origin request policies and cache ..."
+[9]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DefaultRootObject.html?utm_source=chatgpt.com "Specify a default root object - Amazon CloudFront"
+[10]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/standard-logging.html?utm_source=chatgpt.com "Configure standard logging (v2) - Amazon CloudFront"
+[11]: https://repost.aws/knowledge-center/cloudfront-http-security-headers?utm_source=chatgpt.com "Add HTTP security headers to CloudFront responses"
+[12]: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/cloudfront/create-cache-policy.html?utm_source=chatgpt.com "create-cache-policy — AWS CLI 2.27.29 Command Reference"
+[13]: https://repost.aws/questions/QUXETfrRb1SGaZGGlr1uOKzA/why-are-my-files-still-being-requested-after-setting-cache-control-with-cloudfront?utm_source=chatgpt.com "Why Are My Files Still Being Requested After Setting ..."
+[14]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Invalidation_Requests.html?utm_source=chatgpt.com "Invalidate files - Amazon CloudFront"
+[15]: https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html?utm_source=chatgpt.com "AWS Managed Rules rule groups list"
+[16]: https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based-high-level-settings.html?utm_source=chatgpt.com "Rate-based rule high-level settings in AWS WAF"
+[17]: https://docs.aws.amazon.com/cognito/latest/developerguide/authentication.html?utm_source=chatgpt.com "Authentication with Amazon Cognito user pools"
+[18]: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_InitiateAuth.html?utm_source=chatgpt.com "InitiateAuth - Amazon Cognito User Pools"
+[19]: https://sdk.amazonaws.com/java/api/latest/software/amazon/awssdk/services/cognitoidentityprovider/CognitoIdentityProviderClient.html?utm_source=chatgpt.com "CognitoIdentityProviderClient (AWS SDK for Java - 2.32.26)"
+[20]: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CompleteWebAuthnRegistration.html?utm_source=chatgpt.com "CompleteWebAuthnRegistration - Amazon Cognito User ..."
+[21]: https://docs.aws.amazon.com/iot/latest/developerguide/pub-sub-policy.html?utm_source=chatgpt.com "Publish/Subscribe policy examples - AWS IoT Core"
+[22]: https://docs.aws.amazon.com/cli/latest/reference/iot/describe-endpoint.html?utm_source=chatgpt.com "describe-endpoint — AWS CLI 2.28.12 Command Reference"
+[23]: https://docs.aws.amazon.com/iot/latest/developerguide/iot-authorization.html?utm_source=chatgpt.com "Authorization - AWS IoT Core"
+[24]: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_WebAuthnConfigurationType.html?utm_source=chatgpt.com "WebAuthnConfigurationType - Amazon Cognito User Pools"
