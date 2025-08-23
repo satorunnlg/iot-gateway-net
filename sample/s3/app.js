@@ -146,3 +146,116 @@
 		if (e.key === 'Escape' && menu.open) menu.open = false;
 	});
 })();
+
+// --- 追加: メニュー「デバイスを登録」→ パスキー登録フロー（最小追記） ---
+// 参照: README の「認証 > Passkeys（ユーザープール）」、手順書の該当セクション
+(function attachRegisterDeviceHandler() {
+	const btn = document.getElementById('menuRegisterDevice');
+	if (!btn) return;
+
+	const cfg = window.IOTGW_CONFIG;
+	const COG_URL = `https://cognito-idp.${cfg.region}.amazonaws.com/`;
+
+	// Base64URL ⇔ ArrayBuffer（WebAuthn用：局所ユーティリティ）
+	const b64uToBuf = (s) => {
+		if (s instanceof ArrayBuffer) return s;
+		const pad = (x) => x + "===".slice((x.length + 3) % 4);
+		const b64 = pad(String(s).replace(/-/g, "+").replace(/_/g, "/"));
+		const bin = atob(b64);
+		const u = new Uint8Array(bin.length);
+		for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i);
+		return u.buffer;
+	};
+	const bufToB64u = (buf) => {
+		const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+		let s = ""; for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+		return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+	};
+
+	// Cognito JSON API（User Pools）
+	async function cognito(action, body, accessToken) {
+		const headers = {
+			"Content-Type": "application/x-amz-json-1.0",
+			"X-Amz-Target": `AWSCognitoIdentityProviderService.${action}`
+		};
+		if (accessToken) headers["Authorization"] = accessToken; // AccessToken を Authorization に
+		const res = await fetch(COG_URL, { method: "POST", headers, body: JSON.stringify(body) });
+		const js = await res.json().catch(() => ({}));
+		if (!res.ok) {
+			const msg = js.message || js.__type || res.statusText;
+			throw Object.assign(new Error(msg), { status: res.status, details: js });
+		}
+		return js;
+	}
+
+	// パスキー登録フロー
+	async function registerPasskey(accessToken) {
+		// 1) Start
+		const start = await cognito("StartWebAuthnRegistration", { AccessToken: accessToken }, accessToken);
+		let opts =
+			start.PublicKeyCredentialCreationOptions ||
+			start.CredentialCreationOptions ||
+			start.Options ||
+			start.CREDENTIAL_CREATION_OPTIONS;
+		if (typeof opts === "string") { try { opts = JSON.parse(opts); } catch { } }
+		if (!opts) throw new Error("登録オプションを取得できませんでした。");
+
+		// 2) navigator.credentials.create のために各フィールドを整形
+		opts.challenge = b64uToBuf(opts.challenge);
+		if (opts.user && typeof opts.user.id === "string") opts.user.id = b64uToBuf(opts.user.id);
+		if (Array.isArray(opts.excludeCredentials)) {
+			opts.excludeCredentials = opts.excludeCredentials.map(c => ({
+				...c, id: typeof c.id === "string" ? b64uToBuf(c.id) : c.id
+			}));
+		}
+
+		const cred = await navigator.credentials.create({ publicKey: opts });
+		if (!cred) throw new Error("パスキー作成がキャンセルされました。");
+
+		// 3) Complete
+		const regJSON = {
+			id: cred.id,
+			rawId: bufToB64u(cred.rawId),
+			type: cred.type,
+			response: {
+				attestationObject: bufToB64u(cred.response.attestationObject),
+				clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+				transports: typeof cred.response.getTransports === "function" ? cred.response.getTransports() : undefined
+			},
+			clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
+		};
+
+		return cognito("CompleteWebAuthnRegistration", {
+			AccessToken: accessToken,
+			Credential: regJSON
+		}, accessToken);
+	}
+
+	// クリックで実行（ユーザー操作起点）
+	btn.addEventListener('click', async (e) => {
+		e.preventDefault();
+		try {
+			const accessToken = sessionStorage.getItem('access_token');
+			if (!accessToken) throw new Error("サインイン情報が見つかりません。サインインし直してください。");
+
+			btn.disabled = true;
+			const originalLabel = btn.textContent;
+			btn.textContent = "登録中…";
+
+			await registerPasskey(accessToken);
+
+			btn.textContent = "登録しました";
+			// 少し表示してから元に戻す
+			setTimeout(() => {
+				btn.textContent = originalLabel;
+				btn.disabled = false;
+			}, 1200);
+		} catch (err) {
+			console.error("[register device passkey] error:", err);
+			alert("パスキー登録に失敗しました: " + (err?.message || err));
+			btn.textContent = "デバイスを登録";
+			btn.disabled = false;
+		}
+	});
+})();
+

@@ -14,7 +14,6 @@
 			passkey: $("passkeyPane"),
 			password: $("passwordPane"),
 			newpw: $("newPwPane"),
-			register: $("registerPane"),
 		},
 		statusEl: $("status"),
 		remembered: localStorage.getItem("remember_username") || "",
@@ -194,25 +193,6 @@
 		return resp.AuthenticationResult;
 	}
 
-	// ---------- パスキー登録（ログイン後・任意） ----------
-	async function registerPasskey(accessToken) {
-		const start = await cognito("StartWebAuthnRegistration", { AccessToken: accessToken });
-		let opts = start.PublicKeyCredentialCreationOptions || start.CredentialCreationOptions || start.Options || start.CREDENTIAL_CREATION_OPTIONS;
-		if (typeof opts === "string") opts = JSON.parse(opts);
-		opts.challenge = b64uToBuf(opts.challenge);
-		if (opts.user && typeof opts.user.id === "string") opts.user.id = b64uToBuf(opts.user.id);
-		if (Array.isArray(opts.excludeCredentials)) {
-			opts.excludeCredentials = opts.excludeCredentials.map(c => ({ ...c, id: typeof c.id === "string" ? b64uToBuf(c.id) : c.id }));
-		}
-		const cred = await navigator.credentials.create({ publicKey: opts });
-		const regJSON = {
-			id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
-			response: { attestationObject: bufToB64u(cred.response.attestationObject), clientDataJSON: bufToB64u(cred.response.clientDataJSON), transports: cred.response.getTransports ? cred.response.getTransports() : undefined },
-			clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
-		};
-		return cognito("CompleteWebAuthnRegistration", { AccessToken: accessToken, Credential: regJSON });
-	}
-
 	// ---------- トークン保存／遷移 ----------
 	function saveTokens(auth) {
 		sessionStorage.setItem("id_token", auth.IdToken);
@@ -223,7 +203,7 @@
 	}
 	function gotoApp() { location.href = "./amr-control.html"; }
 
-	// ---------- 画面初期化 ----------
+	// ---------- 画面初期化（2回目以降は自動パスキー → 成功なら直遷移） ----------
 	if (state.remembered) {
 		$("rememberedUser").value = state.remembered;
 		show("passkey");
@@ -245,7 +225,7 @@
 	}
 	$("switchToPw").onclick = () => show("password");
 
-	// パスキーサインイン（手動）
+	// パスキーサインイン（手動）— 成功時は直遷移
 	$("btnPasskey").onclick = async () => {
 		try {
 			$("btnPasskey").disabled = true;
@@ -257,7 +237,7 @@
 		finally { $("btnPasskey").disabled = false; }
 	};
 
-	// パスワードサインイン
+	// パスワードサインイン — 成功時は直遷移、NPR は更新後に直遷移
 	$("btnPassword").onclick = async () => {
 		const u = ($("inUser").value || "").trim(); const p = $("inPw").value || "";
 		if (!u || !p) { setStatus("メールとパスワードを入力してください。", "warn"); return; }
@@ -283,17 +263,6 @@
 		finally { $("btnPassword").disabled = false; }
 	};
 
-	// パスキー登録（任意）
-	$("btnRegister").onclick = async () => {
-		try {
-			$("btnRegister").disabled = true;
-			setStatus("パスキー登録中…");
-			await registerPasskey(state.accessToken || sessionStorage.getItem("access_token"));
-			setStatus("この端末をパスキー登録しました。", "ok");
-		} catch (e) { console.error(e); setStatus("パスキー登録に失敗しました", "warn"); }
-		finally { $("btnRegister").disabled = false; }
-	};
-
-	// 操作画面へ
+	// 操作画面へ（UI 残置）
 	$("btnGotoApp").onclick = gotoApp;
 })();
