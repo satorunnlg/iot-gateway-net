@@ -1,0 +1,62 @@
+<!--
+/**
+ * 役割: サインアウト完了画面（中継ページ）
+ * 参照: README の「画面遷移」「UI/キャッシュ」章、手順書の該当セクション
+ * 注意: HTMLは0秒キャッシュ。外部CDN非使用。自動サインインやスクリプトは置かない。
+ */
+-->
+<!doctype html>
+<html lang="ja">
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>サインアウトしました</title>
+	<!-- 既存のデザインを利用（長期キャッシュの反映は README の版管理/無効化を参照） -->
+	<link rel="stylesheet" href="./style.css" />
+	<style>
+		/* ページ固有の最小スタイル（style.css に依存しない軽微なセンタリングのみ） */
+		.signout-wrap {
+			min-height: 100dvh;
+			display: grid;
+			place-items: center;
+			padding: 24px;
+		}
+
+		.signout-card {
+			max-width: 520px;
+			width: 100%;
+		}
+
+		.signout-card .actions {
+			display: flex;
+			gap: 12px;
+			justify-content: center;
+			margin-top: 16px;
+		}
+	</style>
+</head>
+
+<body>
+	<header class="header">
+		<div class="header-title">
+			<span class="brand-badge" aria-hidden="true"></span>
+			<h1 class="title">サインアウト</h1>
+		</div>
+	</header>
+
+	<main class="signout-wrap">
+		<section class="card signout-card">
+			<h2 class="h3">サインアウトが完了しました</h2>
+			<p class="muted">
+				この画面ではサインインは自動的に開始されません。<br />
+				再度ご利用になる場合は、下のボタンからサインインページへお進みください。
+			</p>
+			<div class="actions">
+				<a class="btn-primary" href="./index.html">サインインページへ</a>
+			</div>
+		</section>
+	</main>
+</body>
+
+</html>

@@ -18,7 +18,7 @@
 
 	// ===== 認証チェック（未認証はリダイレクト） =====
 	const idToken = sessionStorage.getItem("id_token");
-	if (!idToken) { location.replace("./index.html"); return; }
+	if (!idToken) { location.replace("./signout.html"); return; }
 	el.authInfo.textContent = "認証状態: 認証済み";
 
 	// ===== サインアウトは常時有効（接続前でも可） =====
@@ -26,7 +26,7 @@
 	el.logoutBtn.onclick = () => {
 		try { if (currentClient && currentClient.isConnected()) currentClient.disconnect(); } catch { }
 		sessionStorage.clear();
-		location.replace("./index.html");
+		location.replace("./signout.html");
 	};
 
 	// 宛先候補

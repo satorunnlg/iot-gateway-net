@@ -79,6 +79,7 @@ sample/
 │  ├─ signin.js            # 認証フロー制御（Passkey 登録含む）
 │  ├─ amr-control.html     # 認証後の AMR 操作 UI
 │  ├─ app.js               # IDプール→SigV4 WSS→MQTT 接続・購読・発行
+│  ├─ signout.html         # サインアウト画面
 │  ├─ config.js            # 公開識別子のみ（リージョン/Pools/Endpoint 等）
 │  ├─ style.css            # 共通デザイン（本書のポリシーを実装）
 │  ├─ vendor/              # 外部 UMD ライブラリ（自己ホスト）

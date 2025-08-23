@@ -462,6 +462,7 @@ Iot-gateway-net/
 │  │  ├─ signin.js                # サインイン処理（USER_AUTH/WEB_AUTHN/NEW_PASSWORD_REQUIRED）
 │  │  ├─ amr-control.html         # AMR 操作用 UI（ログイン後に遷移）
 │  │  ├─ app.js                   # MQTT (WSS/SigV4) ＋ UI 連携
+│  │  ├─ signout.html             # サインアウト画面
 │  │  ├─ config.js                # 公開識別子のみ（Hosted UI 項目が残っていても未使用）
 │  │  ├─ vendor/                  # 外部JSの自己ホスト（aws-sdk, paho-mqtt 等）
 │  │  └─ assets/
