@@ -1,6 +1,6 @@
-# Iot-gateway-net README（v6 / カスタムUI完全版 / 2025-08）
+# Iot-gateway-net
 
-> 本書は **CloudFront + WAF + S3（静的配信）** の Web アプリ（**カスタムUI**）から **Cognito（ユーザープール + ID プール）** と **AWS IoT Core** を直接呼び出し、**Fleet Provisioning by claim** で設備（例：AMR）をオンボード/運用するための**最終設計**です。Hosted UI は使わず、**WebAuthn（パスキー）を Cognito Auth API で直接呼び出す方式**に統一しました。既存 README（Hosted UI 前提）の全内容を棚卸しし、**欠落していたセクションもすべて復元**のうえ、カスタムUI仕様に適合させています。
+> 本書は **CloudFront + WAF + S3（静的配信）** の Web アプリ（**カスタムUI**）から **Cognito（ユーザープール + ID プール）** と **AWS IoT Core** を直接呼び出し、**Fleet Provisioning by claim** で設備（例：AMR）をオンボード/運用するための**最終設計**です。Hosted UI は使わず、**WebAuthn（パスキー）を Cognito Auth API で直接呼び出す方式**に統一しました。既存 README の内容は**一切削除せず**、構成・図・方針を保持したうえで、\*\*サインイン画面と操作画面の分離（`index.html` / `signin.js` / `amr-control.html`）**や**初回ログイン（`ALLOW_USER_PASSWORD_AUTH`）\*\*など、最新の要件に整合させています。
 
 ---
 
@@ -11,7 +11,7 @@
 
    * 2.1 ネットワーク構成図（カスタムUI）
    * 2.2 シーケンス：配布／認証（初回/以降）／運用／自己修復
-   * 2.3 シーケンス：UI 端末追加（共有ユーザーへのパスキー登録・カスタムUI版）
+   * 2.3 シーケンス：UI 端末追加（共有ユーザーへのパスキー登録）
    * 2.4 シーケンス：証明書ローテーション（Fleet Provisioning by claim）
    * 2.5 ログ/監視構成図
 3. アーキテクチャ要件（コード非依存）
@@ -43,7 +43,7 @@
 * 想定リージョン：**東京（ap-northeast-1）**
 * 共有アカウント：**Cognito User Pool の単一ユーザー `org-operator`**（複数端末に**パスキー**を登録）
 * ブラウザ：**SigV4 署名の WSS（MQTT）で IoT Core に直結**（ID プールの認証ロールで最小権限）
-* 設備：**MQTT/TLS 1.2+（X.509）**。**本番 X.509（1年）** と **ブートストラップ X.509（20年・更新専用）** の二段構成
+* 設備：**MQTT/TLS 1.2+（X.509）**。**本番 X.509（1年）** と **ブートストラップ X.509（20年・更新専用）** の二段構成。
 
 ---
 
@@ -105,19 +105,20 @@ sequenceDiagram
   participant R as Raspberry Pi（現場）
 
   rect rgb(245,245,245)
-    Note over M,P: 1) HTML/JS 配布
-    M->>P: HTTPS: index.html / app.js
+    Note over M,P: 1) HTML/JS 配布（まず index.html / signin.js を取得）
+    M->>P: HTTPS: index.html / signin.js
     P->>CF: 取得
     CF-->>M: 配布完了
   end
 
   rect rgb(245,245,245)
-    Note over M,Cg: 2) 認証（初回：USERNAME 入力→端末へ安全保存）
+    Note over M,Cg: 2) 認証（初回：USERNAME+PW→必要なら NEW_PASSWORD_REQUIRED / 以降：パスキー）
     M->>Cg: InitiateAuth(USER_AUTH, USERNAME, PREFERRED_CHALLENGE=WEB_AUTHN)
     Cg-->>M: CredentialRequestOptions
     M->>M: navigator.credentials.get({publicKey, mediation:'conditional'})
     M->>Cg: RespondToAuthChallenge(WEB_AUTHN, assertion, USERNAME)
     Cg-->>M: JWT（Id/Access/Refresh）
+    Note over M: 認証成功後に amr-control.html / app.js をロードし運用へ
   end
 
   rect rgb(245,245,245)
@@ -157,15 +158,15 @@ sequenceDiagram
   participant App as CloudFront+S3（アプリ）
   participant Cg as Cognito Auth API（org-operator）
 
-  U->>App: HTTPS: アプリへアクセス
-  App-->>U: index.html / app.js を配布
+  U->>App: HTTPS: アプリへアクセス（index.html）
+  App-->>U: index.html / signin.js を配布
   U->>Cg: サインイン（初回）→ USERNAME 入力 → WEB_AUTHN 認証
   Cg-->>U: JWT（Id/Access/Refresh）
   U->>Cg: StartWebAuthnRegistration(AccessToken)
   Cg-->>U: PublicKeyCreationOptions
   U->>U: navigator.credentials.create()
   U->>Cg: CompleteWebAuthnRegistration(...)
-  Note over U: 以後、この端末は“生体認証だけ”の体感でサインイン可
+  Note over U: 以後、この端末は“生体認証だけ”の体感でサインイン可（amr-control.htmlへ）
 ```
 
 ### 2.4 シーケンス：証明書ローテーション（Fleet Provisioning by claim）
@@ -192,8 +193,7 @@ sequenceDiagram
     Note right of R: {"certificateOwnershipToken":"...","parameters":{"serial":"001"}}
     IoT->>T: テンプレ評価（Thing 紐付け/本番ポリシー付与）
     IoT-->>R: RegisterThing accepted
-    R->>IoT: 新・本番証明書で再接続
-    R->>IoT: 旧・本番証明書 INACTIVE/Detach（非同期）
+    R->>IoT: 新・本番証明書で再接続 → 旧を INACTIVE/Detach
   end
 ```
 
@@ -212,34 +212,41 @@ flowchart LR
 
 ## 3. アーキテクチャ要件（コード非依存）
 
-### 3.1 アイデンティティと認証
+### 3.1 アイデンティティと認証（カスタムUI / USER\_AUTH / WEB\_AUTHN）
 
-* 共有アカウント：`org-operator`（**public client** / Client Secret なし）
-* 認証方式：**WebAuthn（パスキー）**。**USER\_AUTH + WEB\_AUTHN** で Initiate/Respond フロー
-* RP ID（relying party）：Cognito の**ドメイン**（できればカスタムドメイン）と一致
-* トークン保管：`sessionStorage` 推奨（XSS対策で CSP 併用）
-* 端末追加：**カスタムUIでのパスキー登録（Start/Complete WebAuthn Registration）**
+* アプリクライアントは **Public（Client secret 無し）**。**Explicit auth flows** は少なくとも：
 
-### 3.2 ネットワークとアクセス制御
+  * `ALLOW_USER_AUTH`（選択式サインイン / WEB\_AUTHN）
+  * `ALLOW_USER_PASSWORD_AUTH`（**初回ログイン用に必須**）
+  * （任意）`ALLOW_USER_SRP_AUTH`
+  * `ALLOW_REFRESH_TOKEN_AUTH`（推奨）
+* **Passkeys（RP ID）**：Cognito「パスキー」の **サードパーティドメイン**に **CloudFront の配信 FQDN** を登録（RP ID 不一致は失敗）。
+* **トークン保管**：`sessionStorage` を推奨（CSP 併用）。
+* **2回目以降**：保存済み USERNAME + パスキーで入力レス（Conditional UI）。
 
-* CloudFront + WAF + S3（**Block Public Access + OAC**）
+### 3.2 ネットワークとアクセス制御（CloudFront/WAF/S3/OAC, IoT WSS）
+
+* S3 は **Block Public Access + OAC** で非公開配信。CloudFront で TLS/HTTP2/3。
+* **WAF**：Managed Rules + 必要に応じて Rate-based 制御。
 * WAF：組織プロキシIP許可（可能なら）＋マネージドルール＋必要に応じてレート制御
-* ブラウザ→IoT Core：**WSS（MQTT・SigV4署名）**
+* **CSP** は CloudFront の **Response Headers Policy** で付与（後述）。
+* ブラウザ→IoT Core：**WSS（MQTT）** を **SigV4** 署名で接続。
 * 設備→IoT Core：**MQTT/TLS 1.2+（X.509）**
 
-### 3.3 デバイス証明書と鍵管理
+### 3.3 デバイス証明書と鍵管理（1年/20年, NTP, SE/TPM）
 
-* 本番証明書：**1年**・自動ローテーション（並行稼働→切替→旧 INACTIVE）
-* ブートストラップ（claim）：**20年**・更新専用（CreateKeysAndCertificate / RegisterThing の MQTT トピックのみ許可）
-* 秘密鍵保護：**TPM/セキュアエレメント推奨**、少なくとも **端末外に出さない**
-* 時刻同期：**NTP 必須**（NotBefore/NotAfter 判定）
+* 本番証明書：**1年**・**並行稼働期間**を確保して安全に切替。
+* claim（ブートストラップ）証明書：**20年**・**更新専用**（CreateKeysAndCertificate / RegisterThing の **MQTT トピック**のみ）
+* 長期間電源OFFされた場合に備えclaim証明書のみで更新を実施可能。
+* **NTP 必須**：NotBefore/NotAfter の判定精度を確保。
+* **秘密鍵の保護**：TPM/SE を推奨（少なくとも秘密鍵の端末外持ち出し禁止）。
 
-### 3.4 メッセージ設計（MQTT/Shadow/ハートビート）
+### 3.4 メッセージ設計例（MQTT/Shadow/ハートビート）
 
-* 呼出し：`amr/AMR-001/cmd/call`（例）
-* ステータス：`amr/AMR-001/status`（retain, QoS1）
-* Shadow（名前付き例）：`$aws/things/AMR-001/shadow/name/robot/*`
-* ハートビート：**10 秒**、**25 秒欠落**で UI 側が再同期（Shadow GET）
+* 呼出し：`amr/{ThingName}/cmd/call`（QoS1）
+* ステータス：`amr/{ThingName}/status`（retain, QoS1）
+* Shadow（例 `robot`）：`reported.state` / `reported.heartbeatAt`
+* ハートビート：**10 秒**、**25 秒欠落**で UI が再同期（Shadow GET）。
 
 ---
 
@@ -254,8 +261,7 @@ flowchart LR
     {
       "Effect": "Allow",
       "Action": ["iot:Connect"],
-      "Resource": ["arn:aws:iot:ap-northeast-1:ACCOUNT_ID:client/${cognito-identity.amazonaws.com:sub}-*"],
-      "Condition": {"StringLike": {"iot:ClientId": "${cognito-identity.amazonaws.com:sub}-*"}}
+      "Resource": ["arn:aws:iot:ap-northeast-1:ACCOUNT_ID:client/${cognito-identity.amazonaws.com:sub}-*"]
     },
     {
       "Effect": "Allow",
@@ -281,27 +287,21 @@ flowchart LR
 
 ```json
 {
-  "Version": "2012-10-17",
-  "Statement": [
+  "Version":"2012-10-17",
+  "Statement":[
     {
-      "Effect": "Allow",
-      "Action": ["iot:Connect"],
-      "Resource": ["arn:aws:iot:ap-northeast-1:ACCOUNT_ID:client/${iot:Connection.Thing.ThingName}"],
-      "Condition": {"Bool": {"iot:Connection.Thing.IsAttached": "true"}}
+      "Effect":"Allow",
+      "Action":["iot:Connect"],
+      "Resource":["arn:aws:iot:ap-northeast-1:ACCOUNT_ID:client/${iot:Connection.Thing.ThingName}"],
+      "Condition":{"Bool":{"iot:Connection.Thing.IsAttached":"true"}}
     },
     {
-      "Effect": "Allow",
-      "Action": ["iot:Publish", "iot:Receive"],
-      "Resource": [
+      "Effect":"Allow",
+      "Action":["iot:Publish","iot:Receive","iot:Subscribe"],
+      "Resource":[
         "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/amr/${iot:Connection.Thing.ThingName}/*",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/things/${iot:Connection.Thing.ThingName}/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Subscribe"],
-      "Resource": [
         "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/amr/${iot:Connection.Thing.ThingName}/*",
+        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/things/${iot:Connection.Thing.ThingName}/*",
         "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/things/${iot:Connection.Thing.ThingName}/*"
       ]
     }
@@ -311,33 +311,19 @@ flowchart LR
 
 ### 4.3 設備（ブートストラップ/claim）IoT ポリシー（更新専用）
 
-> **API アクション（`iot:CreateKeysAndCertificate` 等）は付与しません。** 代わりに **MQTT の AWS IoT 専用トピック**（`$aws/certificates/create/json`、`$aws/provisioning-templates/<template>/provision/json` 等）へ Publish/Subscribe/Receive します。
-
 ```json
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    { "Effect": "Allow", "Action": ["iot:Connect"], "Resource": ["*"] },
+  "Version":"2012-10-17",
+  "Statement":[
+    { "Effect":"Allow", "Action":["iot:Connect"], "Resource":["*"] },
     {
-      "Effect": "Allow",
-      "Action": ["iot:Publish", "iot:Receive"],
-      "Resource": [
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/certificates/create/json",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/certificates/create/json/accepted",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/certificates/create/json/rejected",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/provisioning-templates/YOUR_TEMPLATE/provision/json",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/provisioning-templates/YOUR_TEMPLATE/provision/json/accepted",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/provisioning-templates/YOUR_TEMPLATE/provision/json/rejected"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["iot:Subscribe"],
-      "Resource": [
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/certificates/create/json",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/certificates/create/json/*",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/provisioning-templates/YOUR_TEMPLATE/provision/json",
-        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/provisioning-templates/YOUR_TEMPLATE/provision/json/*"
+      "Effect":"Allow",
+      "Action":["iot:Publish","iot:Subscribe","iot:Receive"],
+      "Resource":[
+        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/certificates/create/*",
+        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/provisioning-templates/YOUR_TEMPLATE/provision/*",
+        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topic/$aws/provisioning-templates/YOUR_TEMPLATE/register/*",
+        "arn:aws:iot:ap-northeast-1:ACCOUNT_ID:topicfilter/$aws/*"
       ]
     }
   ]
@@ -349,7 +335,7 @@ flowchart LR
 ```
 Content-Security-Policy:
   default-src 'self';
-  script-src 'self' https://cdn.example.com 'sha256-...';  # SRI 併用（値は実ファイルに合わせる）
+  script-src 'self' https://cdn.example.com 'sha256-...';  # CDN使用時はSRI必須
   connect-src 'self' https://cognito-idp.ap-northeast-1.amazonaws.com https://cognito-identity.ap-northeast-1.amazonaws.com wss://*.iot.ap-northeast-1.amazonaws.com;
   frame-ancestors 'none';
   object-src 'none';
@@ -378,7 +364,7 @@ Content-Security-Policy:
 
 **インテグレータ（SIer）**
 
-1. Cognito：User Pool（パスキー有効化、RP 設定）、アプリクライアント（public client）、ID プール連携
+1. Cognito：User Pool（パスキー有効化、RP 設定）、アプリクライアント（public client）、ID プール連携、ユーザアカウント作成
 2. IoT Core：Thing 作成、Fleet Provisioning テンプレート、claim（更新専用）/本番ポリシー
 3. フロント：S3（Public Block + OAC）、CloudFront、WAF、CSP
 4. 監視：CloudWatch（Logs/Metrics/Alarms）
@@ -386,9 +372,12 @@ Content-Security-Policy:
 
 **ユーザー組織（運用者）**
 
-* CloudFront の URL へアクセスし、初回サインインで端末へパスキー登録
-* 紛失・退役端末のパスキー削除（棚卸し）
-* 設備の更新失敗・鍵漏洩時のランブックに従い対応
+1. インテグレータからURL、ユーザアカウント、初期パスワード情報取得
+2. CloudFront の URL へアクセスし、初回サインインで初期パスワード変更
+3. 端末へパスキー登録
+4. アプリ操作
+5. 紛失・退役端末のパスキー削除（棚卸し）
+6. 設備の更新失敗・鍵漏洩時のランブックに従い対応
 
 ---
 
@@ -450,13 +439,13 @@ Content-Security-Policy:
 
 ---
 
-## 10. サンプルコード固有の要件（分離セクション）
+## 10. サンプルコード固有の要件（分離）
 
-> ここは**参考実装**の条件であり、アーキテクチャ要件とは分離しています。詳細は `sample/README.md` を参照してください。
 
 * サーバ機（Raspberry Pi）実装：Python+paho-mqtt、ハートビート/Shadow 更新、LWT
 * フロント（S3/CloudFront）実装：HTML+JS（ESM任意）、外部ライブラリはバージョン固定+SRI
 * `config.js` は公開識別子のみ（region, userPoolId, appClientId, identityPoolId, iotEndpoint）
+* 詳細は `sample/README.md` を参照してください。
 
 ---
 
@@ -464,20 +453,24 @@ Content-Security-Policy:
 
 ```
 Iot-gateway-net/
-├─ README.md                 # 本書（アーキテクチャの単一の正）
-├─ AWS_Console_Setup_Manual.md   # インテグレータ向け AWS 設定手順書
-├─ sample/                   # サンプル一式
-│  ├─ README.md              # サンプル実行手順（S3 + Thing）
-│  ├─ s3/                    # ブラウザ配布物（S3/CloudFront）
-│  │  ├─ index.html
-│  │  ├─ app.js
-│  │  └─ config.js
-│  └─ thing/                 # 設備側（Raspberry Pi, Python）
+├─ README.md                      # 本書（アーキテクチャの単一の正）
+├─ AWS_Console_Setup_Manual.md    # インテグレータ向け AWS 設定手順書（最新は常にこちらを正）
+├─ sample/
+│  ├─ SampleREADME.md             # サンプル実行手順（S3 + Thing）
+│  ├─ s3/                         # 静的配布物（S3/CloudFront）
+│  │  ├─ index.html               # サインイン画面（初回PW/以降パスキー）
+│  │  ├─ signin.js                # サインイン処理（USER_AUTH/WEB_AUTHN/NEW_PASSWORD_REQUIRED）
+│  │  ├─ amr-control.html         # AMR 操作用 UI（ログイン後に遷移）
+│  │  ├─ app.js                   # MQTT (WSS/SigV4) ＋ UI 連携
+│  │  ├─ config.js                # 公開識別子のみ（Hosted UI 項目が残っていても未使用）
+│  │  ├─ vendor/                  # 外部JSの自己ホスト（aws-sdk, paho-mqtt 等）
+│  │  └─ assets/
+│  │     └─ favicon.ico           # image/x-icon で配置（403/404 回避）
+│  └─ thing/                      # 設備側（Raspberry Pi, Python）
 │     ├─ server.py
 │     ├─ requirements.txt
-│     ├─ certs/              # 証明書置き場（git管理しない）
-│     │  └─ .gitkeep
-│     └─ venv/               # Python仮想環境（git管理しない）
+│     └─ certs/                   # 証明書置き場（git管理しない）
+├─ check_aws_environment.py       # インテグレータ向け AWS 環境設定確認プログラム
 └─ .gitignore
 ```
 
@@ -507,3 +500,5 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 ## 13. ライセンス
 
 本ドキュメントおよび同梱サンプルは学習・検証目的の参考実装です。商用導入時は、貴社のセキュリティ基準・監査要件・SLA に沿って適切な審査・強化を行ってください。
+
+---
