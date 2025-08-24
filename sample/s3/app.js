@@ -46,8 +46,14 @@
 	});
 
 	// ===== SigV4 署名ユーティリティ（AWS SDK v2 ユーティリティを使用） =====
-	function hmac(key, s, hex) { const res = AWS.util.crypto.hmac(key, s, "buffer"); return hex ? AWS.util.crypto.toHex(res) : res; }
-	function sha256(d, hex) { const res = AWS.util.crypto.sha256(d, "buffer"); return hex ? AWS.util.crypto.toHex(res) : res; }
+	function hmac(key, s, hex) {
+		const res = AWS.util.crypto.hmac(key, s, "binary", "sha256");
+		return hex ? AWS.util.crypto.toHex(res) : res;
+	}
+	function sha256(d, hex) {
+		const res = AWS.util.crypto.sha256(d, "binary");
+		return hex ? AWS.util.crypto.toHex(res) : res;
+	}
 	function amzDate(d) { const p = n => n < 10 ? "0" + n : "" + n; return d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()) + "T" + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + "Z"; }
 	function dateStamp(z) { return z.slice(0, 8); }
 	function buildSignedUrl(creds) {
