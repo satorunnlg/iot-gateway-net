@@ -158,6 +158,71 @@
 	const cfg = window.IOTGW_CONFIG;
 	const COG_URL = `https://cognito-idp.${cfg.region}.amazonaws.com/`;
 
+	// ===== ADDED: User Pool トークンの自動リフレッシュ（期限60秒前に更新） =====
+	const loginsKey = `cognito-idp.${cfg.region}.amazonaws.com/${cfg.userPoolId}`;
+	let __rtTimer = null;
+
+	function scheduleTokenRefresh() {
+		const expSec = Number(sessionStorage.getItem("expires_in") || 3600); // 既定1h
+		const skew = 60; // 60秒前に更新
+		const ms = Math.max(5, expSec - skew) * 1000;
+		clearTimeout(__rtTimer);
+		__rtTimer = setTimeout(refreshTokens, ms);
+	}
+
+	async function refreshTokens() {
+		const refresh = sessionStorage.getItem("refresh_token");
+		if (!refresh) return; // リフレッシュ不可（初回サインインが非付与設定など）
+
+		try {
+			// Hosted UIで得た refresh_token を使って User Pool でトークン更新
+			const r = await (async function cognitoInitiateAuth() {
+				const headers = {
+					"Content-Type": "application/x-amz-json-1.0",
+					"X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth"
+				};
+				const body = {
+					AuthFlow: "REFRESH_TOKEN_AUTH",
+					ClientId: cfg.userPoolClientId,           // Publicクライアント（シークレット不要）
+					AuthParameters: { REFRESH_TOKEN: refresh }
+				};
+				const res = await fetch(`https://cognito-idp.${cfg.region}.amazonaws.com/`, {
+					method: "POST", headers, body: JSON.stringify(body)
+				});
+				const js = await res.json().catch(() => ({}));
+				if (!res.ok) throw Object.assign(new Error(js.message || res.statusText), { status: res.status, details: js });
+				return js;
+			})();
+
+			const a = r.AuthenticationResult;
+			if (!a) throw new Error("No AuthenticationResult from REFRESH_TOKEN_AUTH");
+
+			// 既存保存形式に合わせて sessionStorage を更新
+			sessionStorage.setItem("id_token", a.IdToken);
+			sessionStorage.setItem("access_token", a.AccessToken);
+			sessionStorage.setItem("expires_in", String(a.ExpiresIn || 3600));
+
+			// IDプールの Logins を差し替え、次回STS更新に反映
+			if (AWS.config && AWS.config.credentials && AWS.config.credentials.params) {
+				AWS.config.credentials.params.Logins[loginsKey] = a.IdToken;
+				AWS.config.credentials.expired = true;      // 必要に応じて更新させる
+				try { AWS.config.credentials.refresh(() => { }); } catch { }
+			}
+
+			scheduleTokenRefresh();                       // 次回も予約
+			console.debug("[Auth] tokens refreshed");
+		} catch (e) {
+			console.warn("[Auth] token refresh failed", e);
+			// 必要ならここでUIに「再サインインが必要」を表示
+		}
+	}
+
+	// 起動時に refresh_token があればスケジュール開始
+	if (sessionStorage.getItem("refresh_token")) {
+		scheduleTokenRefresh();
+	}
+
+
 	// ====== ADDED: 端末ローカルの CredentialId → エイリアス保存 ======
 	const LOCAL_ALIAS_KEY = "webauthn_aliases_v1"; // { [credentialId]: aliasText }
 	function loadAliases() {
