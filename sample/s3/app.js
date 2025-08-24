@@ -147,7 +147,7 @@
 	});
 })();
 
-// --- 追加: メニュー「デバイスを登録」→ パスキー登録フロー（最小追記） ---
+// --- 追加: メニュー「デバイスを登録」→ パスキー登録/自己判定付き ---
 // メニュー「パスキー登録/削除」トグル対応
 // 参照: README の「認証 > Passkeys（ユーザープール）」、手順書の該当セクション
 (function attachRegisterDeviceHandler() {
@@ -157,6 +157,19 @@
 
 	const cfg = window.IOTGW_CONFIG;
 	const COG_URL = `https://cognito-idp.${cfg.region}.amazonaws.com/`;
+
+	// ====== ADDED: 端末ローカルの CredentialId → エイリアス保存 ======
+	const LOCAL_ALIAS_KEY = "webauthn_aliases_v1"; // { [credentialId]: aliasText }
+	function loadAliases() {
+		try { return JSON.parse(localStorage.getItem(LOCAL_ALIAS_KEY) || "{}"); } catch { return {}; }
+	}
+	function saveAliases(map) { localStorage.setItem(LOCAL_ALIAS_KEY, JSON.stringify(map)); }
+	function setAlias(credId, alias) { const m = loadAliases(); m[credId] = alias; saveAliases(m); }
+	function removeAlias(credId) { const m = loadAliases(); if (m[credId]) { delete m[credId]; saveAliases(m); } }
+	function makeDefaultAlias() {
+		const pf = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "device";
+		return `${location.hostname} / ${pf} / ${new Date().toISOString().slice(0, 10)}`;
+	}
 
 	// Base64URL ⇔ ArrayBuffer（WebAuthn用：局所ユーティリティ）
 	const b64uToBuf = (s) => {
@@ -180,7 +193,7 @@
 			"Content-Type": "application/x-amz-json-1.0",
 			"X-Amz-Target": `AWSCognitoIdentityProviderService.${action}`
 		};
-		if (accessToken) headers["Authorization"] = accessToken; // AccessToken を Authorization に
+		// if (accessToken) headers["Authorization"] = accessToken;
 		const res = await fetch(COG_URL, { method: "POST", headers, body: JSON.stringify(body) });
 		const js = await res.json().catch(() => ({}));
 		if (!res.ok) {
@@ -193,12 +206,12 @@
 	// --- WebAuthn: 登録/一覧/削除 ---
 	async function startRegister(accessToken) {
 		// 1) Start
-		const start = await cognito("StartWebAuthnRegistration", { AccessToken: accessToken }, accessToken); // :contentReference[oaicite:1]{index=1}
+		const start = await cognito("StartWebAuthnRegistration", { AccessToken: accessToken }, accessToken); // WebAuthn開始。Completeと対で使用。:contentReference[oaicite:2]{index=2}
 		let opts = start.PublicKeyCredentialCreationOptions || start.CredentialCreationOptions || start.Options || start.CREDENTIAL_CREATION_OPTIONS;
 		if (typeof opts === "string") try { opts = JSON.parse(opts); } catch { }
 		if (!opts) throw new Error("登録オプションを取得できませんでした。");
 
-		// 2) navigator.credentials.create のために各フィールドを整形
+		// 2) navigator.credentials.create 用に整形
 		opts.challenge = b64uToBuf(opts.challenge);
 		if (opts.user && typeof opts.user.id === "string") opts.user.id = b64uToBuf(opts.user.id);
 		if (Array.isArray(opts.excludeCredentials)) {
@@ -219,14 +232,32 @@
 			},
 			clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
 		};
-		await cognito("CompleteWebAuthnRegistration", { AccessToken: accessToken, Credential: regJSON }, accessToken); // :contentReference[oaicite:2]{index=2}
+		await cognito("CompleteWebAuthnRegistration", { AccessToken: accessToken, Credential: regJSON }, accessToken); // 完了API。:contentReference[oaicite:3]{index=3}
+
+		// ====== ADDED: この端末の CredentialId をローカルに記録 ======
+		setAlias(cred.id, makeDefaultAlias()); // CHANGED/ADDED: 端末判定用のローカル記録
 	}
+
 	async function listPasskeys(accessToken) {
-		const r = await cognito("ListWebAuthnCredentials", { AccessToken: accessToken, MaxResults: 20 }, accessToken); // :contentReference[oaicite:3]{index=3}
-		return Array.isArray(r.Credentials) ? r.Credentials : [];
+		let all = [];
+		let nextToken = undefined;
+
+		do {
+			const body = { AccessToken: accessToken, MaxResults: 20 };
+			if (nextToken) body.NextToken = nextToken;        // ADDED
+
+			const r = await cognito("ListWebAuthnCredentials", body, accessToken);
+			const page = Array.isArray(r.Credentials) ? r.Credentials : [];
+			all = all.concat(page);                            // ADDED
+
+			// 念のためプロパティ名のゆらぎに備える（将来互換のため）
+			nextToken = r.NextToken || r.nextToken || r.NextContinuationToken || null; // ADDED
+		} while (nextToken);
+
+		return all;
 	}
 	async function deletePasskey(accessToken, credentialId) {
-		await cognito("DeleteWebAuthnCredential", { AccessToken: accessToken, CredentialId: credentialId }, accessToken); // :contentReference[oaicite:4]{index=4}
+		await cognito("DeleteWebAuthnCredential", { AccessToken: accessToken, CredentialId: credentialId }, accessToken); // 単一削除API。:contentReference[oaicite:5]{index=5}
 	}
 
 	// 同一RPの資格情報だけ対象（rpId は location.hostname のサブドメイン許容）
@@ -235,6 +266,25 @@
 		return host === rpId || host.endsWith("." + rpId) || rpId.endsWith("." + host);
 	};
 
+	// ====== ADDED: 一覧のログ出力（console.table） ======
+	function logCredentialList(creds) {
+		try {
+			const rows = creds.map(c => ({
+				createdAt: c.CreatedAt,
+				rpId: c.RelyingPartyId,
+				friendly: c.FriendlyCredentialName, // 自動生成のフレンドリ名（設定不可）:contentReference[oaicite:6]{index=6}
+				credId: (c.CredentialId || "").slice(0, 10) + "…" + (c.CredentialId || "").slice(-8),
+				transports: (c.AuthenticatorTransports || []).join(","),
+				attachment: c.AuthenticatorAttachment || ""
+			}));
+			console.groupCollapsed("[Cognito] Passkey credentials (this user)");
+			console.table(rows);
+			console.groupEnd();
+		} catch (e) {
+			console.debug("[logCredentialList] skip", e);
+		}
+	}
+
 	// --- UI状態管理 ---
 	let mode = "register";      // "register" | "delete"
 	let currentRpCreds = [];    // このRPに紐づく既存パスキー（0個以上）
@@ -242,38 +292,55 @@
 	async function refreshButton() {
 		const accessToken = sessionStorage.getItem('access_token');
 		if (!accessToken) { btn.textContent = "パスキーを登録"; btn.disabled = true; return; }
-		const all = await listPasskeys(accessToken);
+
+		const all = await listPasskeys(accessToken).catch(() => []);
 		currentRpCreds = all.filter(c => isSameRp(c.RelyingPartyId));
-		if (currentRpCreds.length > 0) {
+
+		logCredentialList(currentRpCreds); // ====== ADDED: 一覧を常にログ出力
+
+		// ====== CHANGED: この端末に登録があるか（ローカル記録と突き合わせ） ======
+		const aliases = loadAliases();
+		const hasThisDevice = currentRpCreds.some(c => aliases[c.CredentialId]);
+
+		if (hasThisDevice) {
 			mode = "delete";
-			btn.textContent = "パスキーを削除";
+			btn.textContent = "この端末のパスキーを削除"; // CHANGED: 端末限定の削除
 		} else {
 			mode = "register";
-			btn.textContent = "パスキーを登録";
+			btn.textContent = "パスキーを登録（この端末）"; // CHANGED: 既存があっても追加登録を許可
 		}
 		btn.disabled = false;
 	}
 
 	btn.addEventListener('click', async (e) => {
 		e.preventDefault();
-			const accessToken = sessionStorage.getItem('access_token');
+		const accessToken = sessionStorage.getItem('access_token');
 		if (!accessToken) { alert("サインイン情報が見つかりません。サインインし直してください。"); return; }
 
 		const orig = btn.textContent;
-			btn.disabled = true;
+		btn.disabled = true;
 
 		try {
 			if (mode === "register") {
-			btn.textContent = "登録中…";
+				btn.textContent = "登録中…";
 				await startRegister(accessToken);
-				await refreshButton();                   // → 「削除」に切替
+				await refreshButton();                   // 表示更新（→「この端末の…削除」に切替されるはず）
 			} else {
 				btn.textContent = "削除中…";
-				for (const cred of currentRpCreds) {     // 同一RPの登録を全削除
-					await deletePasskey(accessToken, cred.CredentialId);
+				// ====== CHANGED: この端末に紐づく CredentialId のみ削除 ======
+				const aliases = loadAliases();
+				const toDelete = currentRpCreds.filter(c => aliases[c.CredentialId]);
+				if (toDelete.length === 0) {
+					alert("この端末で登録されたパスキーは見つかりません。");
+				} else {
+					for (const cred of toDelete) {
+						await deletePasskey(accessToken, cred.CredentialId);
+						removeAlias(cred.CredentialId); // ローカル対応する記録も消す
+					}
 				}
-				localStorage.removeItem("remember_username"); // 次回はPW画面に
-				await refreshButton();                   // → 「登録」に切替
+				// 端末ごとの自動起動抑止が必要な運用なら、以下の行は残す
+				// localStorage.removeItem("remember_username");
+				await refreshButton();                   // 表示を再計算
 			}
 			if (menuEl && menuEl.open) menuEl.open = false; // 操作後はメニューを閉じる
 		} catch (err) {
@@ -288,4 +355,5 @@
 	// 初期化：登録有無でラベル設定
 	refreshButton().catch((e) => console.warn("ListWebAuthnCredentials 失敗:", e));
 })();
+
 
