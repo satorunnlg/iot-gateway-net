@@ -175,3 +175,4 @@ cython_debug/
 AmazonRootCA1.pem
 favicon1.png
 favicon2.png
+envcheck-*
