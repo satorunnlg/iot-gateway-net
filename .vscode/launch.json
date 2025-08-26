@@ -16,14 +16,24 @@
 			"type": "debugpy",
 			"request": "launch",
 			"program": "${workspaceFolder}\\check_aws_environment.py",
-			"console": "integratedTerminal"
+			"console": "integratedTerminal",
+			"cwd": "${fileDirname}"
 		},
 		{
 			"name": "Python デバッガー: provision_and_verify",
 			"type": "debugpy",
 			"request": "launch",
 			"program": "${workspaceFolder}\\sample\\thing\\provision_and_verify.py",
-			"console": "integratedTerminal"
+			"console": "integratedTerminal",
+			"cwd": "${fileDirname}"
+		},
+		{
+			"name": "Python デバッガー: server",
+			"type": "debugpy",
+			"request": "launch",
+			"program": "${workspaceFolder}\\sample\\thing\\server.py",
+			"console": "integratedTerminal",
+			"cwd": "${fileDirname}"
 		}
 	]
 }

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<title>AWS IoT Core WebSocket 接続テスター（IdentityId手入力対応）</title>
+<style>
+	body {
+		font-family: system-ui, sans-serif;
+		margin: 24px;
+		line-height: 1.6;
+	}
+
+	label {
+		display: block;
+		margin-top: 12px;
+	}
+
+	input {
+		width: 720px;
+		max-width: 100%;
+		padding: 6px 8px;
+	}
+
+	button {
+		margin-top: 16px;
+		padding: 8px 14px;
+		cursor: pointer;
+	}
+
+	pre {
+		background: #111;
+		color: #0f0;
+		padding: 12px;
+		overflow: auto;
+		max-height: 360px;
+	}
+
+	.ok {
+		color: #0a0;
+		font-weight: 600;
+	}
+
+	.ng {
+		color: #a00;
+		font-weight: 600;
+	}
+
+	small {
+		color: #666;
+	}
+</style>
+
+<body>
+	<h1>AWS IoT Core WebSocket 接続テスター</h1>
+	<p>このページと <code>test_local.js</code> のみで、Cognito Identity → 一時クレデンシャル → 署名付きURL → WebSocket ハンドシェイクを確認します。</p>
+
+	<label>Region
+		<input id="region" value="ap-northeast-1">
+	</label>
+
+	<label>IdentityId（任意）<small> 例: ap-northeast-1:xxxxxxxx-xxxx-.... 入力時は下の Identity Pool ID は不要</small>
+		<input id="identityId" placeholder="ap-northeast-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+	</label>
+
+	<label>Identity Pool ID（IdentityId 未入力時のみ使用）<small> 例: ap-northeast-1:xxxxxxxx-....</small>
+		<input id="identityPoolId" placeholder="ap-northeast-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+	</label>
+
+	<label>IoT endpoint host <small>例: aaaaaaaa-ats.iot.ap-northeast-1.amazonaws.com（ATS・小文字）</small>
+		<input id="iotHost" placeholder="xxxxxxxx-ats.iot.ap-northeast-1.amazonaws.com">
+	</label>
+
+	<button id="btn">接続テスト</button>
+
+	<h3>結果</h3>
+	<div id="result"></div>
+
+	<h3>ログ</h3>
+	<pre id="log"></pre>
+
+	<script src="./test_local.js"></script>
+</body>
+
+</html>
