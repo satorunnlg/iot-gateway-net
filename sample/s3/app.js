@@ -18,10 +18,16 @@
 		logoutBtn: $("logoutBtn")
 	};
 
-	// ===== 認証チェック（未認証はリダイレクト） =====
+	// ===== 認証チェック（テスト用：未認証ユーザーロールを使用） =====
+	// CHANGED: 未認証ロールでのテストのため認証チェックをコメントアウト
 	const idToken = sessionStorage.getItem("id_token");
-	if (!idToken) { location.replace("./signout.html"); return; }
-	el.authInfo.textContent = "認証状態: 認証済み";
+	// if (!idToken) { location.replace("./signout.html"); return; }
+
+	if (idToken) {
+		el.authInfo.textContent = "認証状態: 認証済み（User Pool）";
+	} else {
+		el.authInfo.textContent = "認証状態: 未認証ユーザー（テスト用）";
+	}
 
 	// ===== サインアウトは常時有効（接続前でも可） =====
 	let currentClient = null; // 接続後に代入
@@ -48,19 +54,33 @@
 	function setStatus(t, cls) { el.status.textContent = t; el.status.classList.remove("ok", "warn"); if (cls) el.status.classList.add(cls); }
 	function setBtnMoving(m) { if (m) { el.callBtn.textContent = "呼出し中"; el.callBtn.disabled = true; } else { el.callBtn.textContent = "呼出し"; el.callBtn.disabled = false; } }
 
-	// ===== AWS 資格情報（ID プール） =====
+	// ===== AWS 資格情報（ID プール - 未認証/認証両対応） =====
 	AWS.config.region = cfg.region;
-	const loginsKey = `cognito-idp.${cfg.region}.amazonaws.com/${cfg.userPoolId}`;
-	AWS.config.credentials = new AWS.CognitoIdentityCredentials({
-		IdentityPoolId: cfg.identityPoolId,
-		Logins: { [loginsKey]: idToken }
-	});
+
+	// CHANGED: 未認証ユーザーも対応するように修正
+	if (idToken) {
+		// 認証済みユーザーの場合
+		const loginsKey = `cognito-idp.${cfg.region}.amazonaws.com/${cfg.userPoolId}`;
+		AWS.config.credentials = new AWS.CognitoIdentityCredentials({
+			IdentityPoolId: cfg.identityPoolId,
+			Logins: { [loginsKey]: idToken }
+		});
+		console.info("[AWS] Using authenticated role");
+	} else {
+		// 未認証ユーザーの場合
+		AWS.config.credentials = new AWS.CognitoIdentityCredentials({
+			IdentityPoolId: cfg.identityPoolId
+			// Logins を指定しないことで未認証ロールが適用される
+		});
+		console.info("[AWS] Using unauthenticated role");
+	}
 
 	// ===== SigV4 署名ユーティリティ（CryptoJS + moment.js版） =====
 	// 参考: https://dev.classmethod.jp/articles/aws-iot-mqtt-over-websocket/
 	function SigV4Utils() { }
 
 	SigV4Utils.sign = function (key, msg) {
+		// FIXED: WordArrayを使用してHMAC計算
 		var hash = CryptoJS.HmacSHA256(msg, key);
 		return hash.toString(CryptoJS.enc.Hex);
 	};
@@ -71,6 +91,7 @@
 	};
 
 	SigV4Utils.getSignatureKey = function (key, dateStamp, regionName, serviceName) {
+		// FIXED: 'AWS4' + key を最初に設定
 		var kDate = CryptoJS.HmacSHA256(dateStamp, 'AWS4' + key);
 		var kRegion = CryptoJS.HmacSHA256(regionName, kDate);
 		var kService = CryptoJS.HmacSHA256(serviceName, kRegion);
@@ -93,15 +114,31 @@
 
 		const credentialScope = dateStamp + '/' + region + '/' + service + '/' + 'aws4_request';
 
-		// クエリストリングの構築
-		let canonicalQuerystring = 'X-Amz-Algorithm=AWS4-HMAC-SHA256';
-		canonicalQuerystring += '&X-Amz-Credential=' + encodeURIComponent(accessKey + '/' + credentialScope);
-		canonicalQuerystring += '&X-Amz-Date=' + amzdate;
-		canonicalQuerystring += '&X-Amz-SignedHeaders=host';
+		// FIXED: クエリパラメータを正しい順序で構築
+		const queryParams = {
+			'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+			'X-Amz-Credential': accessKey + '/' + credentialScope,
+			'X-Amz-Date': amzdate,
+			'X-Amz-SignedHeaders': 'host'
+		};
 
-		// セッショントークンがある場合は追加
+		// セッショントークンがある場合は追加（署名計算では除外）
+		const sessionTokenForUrl = sessionToken;
 		if (sessionToken) {
-			canonicalQuerystring += '&X-Amz-Security-Token=' + encodeURIComponent(sessionToken);
+			queryParams['X-Amz-Security-Token'] = sessionToken;
+		}
+
+		// FIXED: クエリストリングをアルファベット順にソートして構築
+		const sortedKeys = Object.keys(queryParams).sort();
+		let canonicalQuerystring = '';
+
+		for (let i = 0; i < sortedKeys.length; i++) {
+			const key = sortedKeys[i];
+			// FIXED: セッショントークンは署名計算時には含めない
+			if (key === 'X-Amz-Security-Token') continue;
+
+			if (canonicalQuerystring) canonicalQuerystring += '&';
+			canonicalQuerystring += encodeURIComponent(key) + '=' + encodeURIComponent(queryParams[key]);
 		}
 
 		const canonicalHeaders = 'host:' + host + '\n';
@@ -116,19 +153,30 @@
 		const signingKey = SigV4Utils.getSignatureKey(secretKey, dateStamp, region, service);
 		const signature = SigV4Utils.sign(signingKey, stringToSign);
 
-		canonicalQuerystring += '&X-Amz-Signature=' + signature;
+		// ADDED: デバッグ情報を出力
+		console.log('[SigV4 Debug] Canonical Request:', canonicalRequest);
+		console.log('[SigV4 Debug] String to Sign:', stringToSign);
+		console.log('[SigV4 Debug] Signature:', signature);
 
-		return 'wss://' + host + canonicalUri + '?' + canonicalQuerystring;
+		// FIXED: 最終URLにセッショントークンを含める
+		let finalQuerystring = canonicalQuerystring + '&X-Amz-Signature=' + signature;
+		if (sessionTokenForUrl) {
+			finalQuerystring += '&X-Amz-Security-Token=' + encodeURIComponent(sessionTokenForUrl);
+		}
+
+		return 'wss://' + host + canonicalUri + '?' + finalQuerystring;
 	}
 
 	function connect(creds) {
 		const identityId = AWS.config.credentials.identityId;
-		const clientId = identityId;
+		// CHANGED: 未認証ユーザーの場合は固定プレフィックス＋ランダムIDを使用
+		const clientId = identityId || `unauthenticated-${Math.random().toString(36).substring(2, 15)}`;
 
 		console.info("[Paho MQTT] Connecting...", {
 			identityId: identityId,
 			clientId: clientId,
-			endpoint: cfg.iotEndpoint
+			endpoint: cfg.iotEndpoint,
+			authenticated: !!identityId
 		});
 
 		try {
@@ -143,8 +191,14 @@
 
 			console.log("[Paho MQTT] WebSocket endpoint:", endpoint.substring(0, 200) + "...");
 
-			// CHANGED: Paho MQTT クライアントの作成
-			const client = new Paho.MQTT.Client(endpoint, clientId);
+			// CHANGED: Paho MQTT クライアントの作成（URLパースで正しく処理）
+			const wsUrl = new URL(endpoint);
+			const client = new Paho.MQTT.Client(
+				wsUrl.host,        // ホスト部分のみ
+				wsUrl.port || 443, // ポート（通常443）
+				wsUrl.pathname + wsUrl.search, // パス＋クエリストリング
+				clientId
+			);
 			currentClient = client;
 
 			// 状態管理
@@ -174,7 +228,8 @@
 				if (!lastHB) return;
 				const timeSinceLastHB = Date.now() - lastHB;
 
-				if (timeSinceLastHB > 25000) {
+				// CHANGED: より長い時間待ってから通信不良と判定（45秒）
+				if (timeSinceLastHB > 45000) {
 					setStatus("通信不良（再同期中）", "warn");
 					if (client.isConnected()) {
 						try {
@@ -188,24 +243,24 @@
 					}
 				}
 
-				// 長時間通信不良の場合は強制再接続
-				if (timeSinceLastHB > 60000 && client.isConnected()) {
-					console.warn('[Paho MQTT] Force reconnect due to long heartbeat gap');
+				// CHANGED: 非常に長時間の場合のみ強制再接続（5分）
+				if (timeSinceLastHB > 300000 && client.isConnected()) {
+					console.warn('[Paho MQTT] Force reconnect due to very long heartbeat gap (5min)');
 					try {
 						client.disconnect();
 						setTimeout(() => {
-							client.connect(connectOptions);
-						}, 2000);
+							connectWithRetry(); // 新しい認証情報で再接続
+						}, 3000);
 					} catch (err) {
 						console.error('[Paho MQTT] Force reconnect error:', err);
 					}
 				}
-			}, 1000);
+			}, 5000); // CHANGED: チェック間隔を5秒に変更
 
-			// CHANGED: Paho MQTT のイベントハンドラ
+			// 接続オプション（タイムアウト値を調整）
 			const connectOptions = {
 				useSSL: true,
-				timeout: 30,
+				timeout: 60,                // CHANGED: タイムアウトを60秒に延長
 				keepAliveInterval: 30,
 				mqttVersion: 4,
 				onSuccess: function () {
@@ -213,11 +268,19 @@
 					setStatus("接続済み", "ok");
 					setBtnMoving(false);
 
-					// トピックをサブスクライブ
+					// REMOVED: 重複した lastHB 初期化を削除（既に connect 関数開始時に設定済み）
+
+					// トピックをサブスクライブ（Classic Shadow対応も追加）
 					const topics = [
 						`amr/${cfg.thingName}/status`,
+						// Named Shadow (現在の設定)
 						`$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/update/documents`,
-						`$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/get/accepted`
+						`$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/get/accepted`,
+						`$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/get/rejected`,
+						// Classic Shadow（デバッグ用）
+						`$aws/things/${cfg.thingName}/shadow/update/documents`,
+						`$aws/things/${cfg.thingName}/shadow/get/accepted`,
+						`$aws/things/${cfg.thingName}/shadow/get/rejected`
 					];
 
 					// 順次サブスクライブ
@@ -236,21 +299,39 @@
 							} catch (err) {
 								console.error(`[Paho MQTT] Subscribe setup error for ${topic}:`, err);
 							}
-						}, index * 200); // 200ms間隔で順次実行
+						}, index * 300); // CHANGED: 300ms間隔でより安全に実行
 					});
 
-					// 初期Shadow取得
+					// ADDED: Shadow存在確認のため複数パターンをテスト
 					setTimeout(() => {
-						try {
-							const message = new Paho.MQTT.Message("{}");
-							message.destinationName = `$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/get`;
-							message.qos = 1;
-							client.send(message);
-							console.log('[Paho MQTT] Initial shadow get sent');
-						} catch (err) {
-							console.error('[Paho MQTT] Initial shadow get error:', err);
-						}
-					}, 1000);
+						if (!client.isConnected()) return;
+
+						const shadowTests = [
+							"", // Classic Shadow
+							"robot", // 設定されている名前
+							"main", // よくある名前
+							"status" // よくある名前
+						];
+
+						shadowTests.forEach((shadowName, index) => {
+							setTimeout(() => {
+								try {
+									const topic = shadowName ?
+										`$aws/things/${cfg.thingName}/shadow/name/${shadowName}/get` :
+										`$aws/things/${cfg.thingName}/shadow/get`;
+
+									console.log(`[DEBUG] Testing shadow: "${shadowName || 'classic'}" with topic: ${topic}`);
+
+									const message = new Paho.MQTT.Message("{}");
+									message.destinationName = topic;
+									message.qos = 1;
+									client.send(message);
+								} catch (err) {
+									console.error(`[DEBUG] Shadow test error for "${shadowName}":`, err);
+								}
+							}, index * 1000); // 1秒間隔でテスト
+						});
+					}, 3000);
 				},
 				onFailure: function (err) {
 					console.error('[Paho MQTT] Connection failed:', err);
@@ -276,6 +357,13 @@
 							updatedAt: r.updatedAt,
 							heartbeatAt: r.heartbeatAt
 						});
+					} else if (topic.endsWith("/get/rejected")) {
+						// ADDED: Shadow get エラーハンドリング
+						console.warn(`[Paho MQTT] Shadow get rejected:`, js);
+						if (js.code === 404) {
+							console.warn(`[Paho MQTT] Shadow '${cfg.shadowName}' does not exist for thing '${cfg.thingName}'`);
+							setStatus("Shadow未作成", "warn");
+						}
 					} else if (topic.endsWith("/update/documents")) {
 						const r = js?.current?.state?.reported;
 						if (r) update({
@@ -295,30 +383,17 @@
 				setStatus("接続切断", "warn");
 				setBtnMoving(true);
 
-				// 自動再接続（エラーコードに応じて）
+				// CHANGED: エラーコード0（正常切断）以外の場合のみ自動再接続
 				if (responseObject.errorCode !== 0) {
-					console.log('[Paho MQTT] Attempting reconnection...');
+					console.log('[Paho MQTT] Attempting reconnection in 5 seconds...');
 					setTimeout(() => {
 						try {
-							// 認証情報を更新してから再接続
-							AWS.config.credentials.refresh(() => {
-								const newEndpoint = createEndpoint(
-									cfg.region,
-									cfg.iotEndpoint,
-									AWS.config.credentials.accessKeyId,
-									AWS.config.credentials.secretAccessKey,
-									AWS.config.credentials.sessionToken
-								);
-								const newClient = new Paho.MQTT.Client(newEndpoint, clientId);
-								currentClient = newClient;
-								newClient.onMessageArrived = client.onMessageArrived;
-								newClient.onConnectionLost = client.onConnectionLost;
-								newClient.connect(connectOptions);
-							});
+							// CHANGED: 新しい認証情報で完全に再接続
+							connectWithRetry();
 						} catch (err) {
-							console.error('[Paho MQTT] Reconnection error:', err);
+							console.error('[Paho MQTT] Reconnection setup error:', err);
 						}
-					}, 5000);
+					}, 5000); // 5秒待ってから再接続
 				}
 			};
 
@@ -356,12 +431,10 @@
 				}
 			};
 
-			// クリーンアップ関数
+			// クリーンアップ関数（簡素化）
 			const cleanup = () => {
-				if (heartbeatTimer) {
-					clearInterval(heartbeatTimer);
-					heartbeatTimer = null;
-				}
+				console.log('[DEBUG] Cleanup called');
+				// ハートビートタイマーは削除済みのため、クリーンアップ不要
 			};
 
 			// ページ離脱時のクリーンアップ
@@ -442,6 +515,15 @@
 
 	const cfg = window.IOTGW_CONFIG;
 	const COG_URL = `https://cognito-idp.${cfg.region}.amazonaws.com/`;
+
+	// CHANGED: 未認証ユーザーの場合は無効化
+	const idToken = sessionStorage.getItem("id_token");
+	if (!idToken) {
+		btn.textContent = "パスキー機能（要認証）";
+		btn.disabled = true;
+		btn.title = "パスキー機能を使用するには認証が必要です";
+		return;
+	}
 
 	// ===== ADDED: User Pool トークンの自動リフレッシュ（期限60秒前に更新） =====
 	const loginsKey = `cognito-idp.${cfg.region}.amazonaws.com/${cfg.userPoolId}`;

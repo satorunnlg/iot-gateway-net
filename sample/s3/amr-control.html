@@ -43,7 +43,7 @@
 
 		<div class="card wrap">
 			<h1 class="card-title">AMR 操作</h1>
-			<div class="card-subtitle">Cognito（IDプール）＋ IoT MQTT over WSS</div>
+			<div class="card-subtitle">Cognito（IDプール：未認証/認証両対応）＋ IoT MQTT over WSS (CryptoJS + Paho)</div>
 
 			<div class="row">
 				<label class="label">ステータス</label>
@@ -75,6 +75,7 @@
 
 	<!-- ライブラリ（セルフホスト UMD） -->
 	<script src="vendor/aws-sdk-2.1481.0.min.js"></script>
+	<!-- CHANGED: CryptoJS + moment.js + Paho MQTT に変更 -->
 	<script src="vendor/moment-2.29.4.min.js"></script>
 	<script src="vendor/crypto-js-4.1.1.min.js"></script>
 	<script src="vendor/paho-mqtt-1.1.0.min.js"></script>
