@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>AWS IoT SDK v2 – quick connect</title>
+
+<!-- SDK v2 の ESM を unpkg から読み込み -->
+<script type="module">
+	import { auth, mqtt, io, iot } from "https://unpkg.com/aws-iot-device-sdk-v2/dist/index.js";
+
+	// ====== ここを書き換え ======
+	const REGION = "ap-northeast-1";                          // ← 例: ap-northeast-1
+	const IDENTITY_POOL_ID = "ap-northeast-1:4b39a8fb-49d2-429f-9523-a5c7534d9ab0";  // ← あなたの Cognito Identity Pool ID
+	const IOT_ENDPOINT = "a2osrgpri6xnln-ats.iot.ap-northeast-1.amazonaws.com"; // ← あなたの IoT Core エンドポイント(ホスト名のみ)
+	// ===========================
+
+	// 適当なクライアントID（IoTポリシーが clientId を縛るなら、そのルールに合わせて生成）
+	const clientId = `web-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2, 8)}`;
+
+	// 1) Cognito(Unauthでも可) から一時クレデンシャルを取得する CredentialsProvider を用意
+	//    newCognito() は Identity Pool 直指定の簡易プロバイダです。
+	const provider = await auth.AwsCredentialsProvider.newCognito({
+		identity: { identity_pool_id: IDENTITY_POOL_ID },
+		region: REGION,
+	}); // :contentReference[oaicite:1]{index=1}
+
+	// 2) WebSocket + SigV4 の接続設定を構築
+	//    new_with_websockets({ region, credentials_provider }) を使い、
+	//    clientId / clean-session / endpoint を指定します。
+	const cfgBuilder = iot.AwsIotMqttConnectionConfigBuilder.new_with_websockets({
+		region: REGION,
+		credentials_provider: provider,
+	}); // :contentReference[oaicite:2]{index=2}
+	cfgBuilder.with_clean_session(true);
+	cfgBuilder.with_client_id(clientId);
+	cfgBuilder.with_endpoint(IOT_ENDPOINT); // ホスト名のみ（プロトコルや /mqtt は不要） :contentReference[oaicite:3]{index=3}
+	const config = cfgBuilder.build();
+
+	// 3) クライアントを作って接続
+	const clientBootstrap = new io.ClientBootstrap();
+	const mqttClient = new mqtt.MqttClient(clientBootstrap);
+	const connection = mqttClient.new_connection(config);
+
+	// ログ
+	console.info("[v2] region:", REGION, "endpoint:", IOT_ENDPOINT, "clientId:", clientId);
+
+	try {
+		await connection.connect(); // 成功でMQTTセッション確立
+		console.info("[v2] connected!");
+
+		// 動作確認: 適当なトピックに subscribe/publish
+		const testTopic = `amr/test/${clientId}`;
+		await connection.subscribe(testTopic, mqtt.QoS.AtLeastOnce, (topic, payload) => {
+			console.info("[v2] message", topic, new TextDecoder().decode(payload));
+		});
+		await connection.publish(testTopic, new TextEncoder().encode("hello from v2"), mqtt.QoS.AtLeastOnce);
+		console.info("[v2] published to", testTopic);
+
+		// 必要なら: await connection.disconnect();
+	} catch (e) {
+		console.error("[v2] connect error:", e);
+	}
+</script>
