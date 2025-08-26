@@ -18,16 +18,14 @@
 		logoutBtn: $("logoutBtn")
 	};
 
-	// ===== 認証チェック（テスト用：未認証ユーザーロールを使用） =====
-	// CHANGED: 未認証ロールでのテストのため認証チェックをコメントアウト
+	// ===== 認証チェック（認証済みロール用） =====
 	const idToken = sessionStorage.getItem("id_token");
-	// if (!idToken) { location.replace("./signout.html"); return; }
-
-	if (idToken) {
-		el.authInfo.textContent = "認証状態: 認証済み（User Pool）";
-	} else {
-		el.authInfo.textContent = "認証状態: 未認証ユーザー（テスト用）";
+	if (!idToken) {
+		console.warn("No ID token found, redirecting to signout");
+		location.replace("./signout.html");
+		return;
 	}
+	el.authInfo.textContent = "認証状態: 認証済み（User Pool）";
 
 	// ===== サインアウトは常時有効（接続前でも可） =====
 	let currentClient = null; // 接続後に代入
@@ -54,26 +52,16 @@
 	function setStatus(t, cls) { el.status.textContent = t; el.status.classList.remove("ok", "warn"); if (cls) el.status.classList.add(cls); }
 	function setBtnMoving(m) { if (m) { el.callBtn.textContent = "呼出し中"; el.callBtn.disabled = true; } else { el.callBtn.textContent = "呼出し"; el.callBtn.disabled = false; } }
 
-	// ===== AWS 資格情報（ID プール - 未認証/認証両対応） =====
+	// ===== AWS 資格情報（ID プール - 認証済みロール） =====
 	AWS.config.region = cfg.region;
 
-	// CHANGED: 未認証ユーザーも対応するように修正
-	if (idToken) {
-		// 認証済みユーザーの場合
-		const loginsKey = `cognito-idp.${cfg.region}.amazonaws.com/${cfg.userPoolId}`;
-		AWS.config.credentials = new AWS.CognitoIdentityCredentials({
-			IdentityPoolId: cfg.identityPoolId,
-			Logins: { [loginsKey]: idToken }
-		});
-		console.info("[AWS] Using authenticated role");
-	} else {
-		// 未認証ユーザーの場合
-		AWS.config.credentials = new AWS.CognitoIdentityCredentials({
-			IdentityPoolId: cfg.identityPoolId
-			// Logins を指定しないことで未認証ロールが適用される
-		});
-		console.info("[AWS] Using unauthenticated role");
-	}
+	// 認証済みユーザーの認証情報設定
+	const loginsKey = `cognito-idp.${cfg.region}.amazonaws.com/${cfg.userPoolId}`;
+	AWS.config.credentials = new AWS.CognitoIdentityCredentials({
+		IdentityPoolId: cfg.identityPoolId,
+		Logins: { [loginsKey]: idToken }
+	});
+	console.info("[AWS] Using authenticated role with User Pool token");
 
 	// ===== SigV4 署名ユーティリティ（CryptoJS + moment.js版） =====
 	// 参考: https://dev.classmethod.jp/articles/aws-iot-mqtt-over-websocket/
@@ -169,14 +157,13 @@
 
 	function connect(creds) {
 		const identityId = AWS.config.credentials.identityId;
-		// CHANGED: 未認証ユーザーの場合は固定プレフィックス＋ランダムIDを使用
-		const clientId = identityId || `unauthenticated-${Math.random().toString(36).substring(2, 15)}`;
+		const clientId = identityId; // 認証済みロールではIdentity IDを直接使用
 
-		console.info("[Paho MQTT] Connecting...", {
+		console.info("[Paho MQTT] Connecting with authenticated role...", {
 			identityId: identityId,
 			clientId: clientId,
 			endpoint: cfg.iotEndpoint,
-			authenticated: !!identityId
+			authenticated: true
 		});
 
 		try {
@@ -270,17 +257,13 @@
 
 					// REMOVED: 重複した lastHB 初期化を削除（既に connect 関数開始時に設定済み）
 
-					// トピックをサブスクライブ（Classic Shadow対応も追加）
+					// トピックをサブスクライブ（モニタ・制御専用）
 					const topics = [
 						`amr/${cfg.thingName}/status`,
-						// Named Shadow (現在の設定)
+						// Shadow監視（更新トピックは不要）
 						`$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/update/documents`,
 						`$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/get/accepted`,
-						`$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/get/rejected`,
-						// Classic Shadow（デバッグ用）
-						`$aws/things/${cfg.thingName}/shadow/update/documents`,
-						`$aws/things/${cfg.thingName}/shadow/get/accepted`,
-						`$aws/things/${cfg.thingName}/shadow/get/rejected`
+						`$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/get/rejected`
 					];
 
 					// 順次サブスクライブ
@@ -302,35 +285,16 @@
 						}, index * 300); // CHANGED: 300ms間隔でより安全に実行
 					});
 
-					// ADDED: Shadow存在確認のため複数パターンをテスト
+					// Shadow存在確認（作成は行わず、監視のみ）
 					setTimeout(() => {
 						if (!client.isConnected()) return;
 
-						const shadowTests = [
-							"", // Classic Shadow
-							"robot", // 設定されている名前
-							"main", // よくある名前
-							"status" // よくある名前
-						];
+						console.log(`[DEBUG] Checking existing shadow: Thing=${cfg.thingName}, Shadow=${cfg.shadowName}`);
 
-						shadowTests.forEach((shadowName, index) => {
-							setTimeout(() => {
-								try {
-									const topic = shadowName ?
-										`$aws/things/${cfg.thingName}/shadow/name/${shadowName}/get` :
-										`$aws/things/${cfg.thingName}/shadow/get`;
-
-									console.log(`[DEBUG] Testing shadow: "${shadowName || 'classic'}" with topic: ${topic}`);
-
-									const message = new Paho.MQTT.Message("{}");
-									message.destinationName = topic;
-									message.qos = 1;
-									client.send(message);
-								} catch (err) {
-									console.error(`[DEBUG] Shadow test error for "${shadowName}":`, err);
-								}
-							}, index * 1000); // 1秒間隔でテスト
-						});
+						const message = new Paho.MQTT.Message("{}");
+						message.destinationName = `$aws/things/${cfg.thingName}/shadow/name/${cfg.shadowName}/get`;
+						message.qos = 1;
+						client.send(message);
 					}, 3000);
 				},
 				onFailure: function (err) {
@@ -339,7 +303,7 @@
 				}
 			};
 
-			// メッセージ受信ハンドラ
+			// メッセージ受信ハンドラ（モニタ・制御専用）
 			client.onMessageArrived = function (message) {
 				try {
 					const topic = message.destinationName;
@@ -358,12 +322,15 @@
 							heartbeatAt: r.heartbeatAt
 						});
 					} else if (topic.endsWith("/get/rejected")) {
-						// ADDED: Shadow get エラーハンドリング
 						console.warn(`[Paho MQTT] Shadow get rejected:`, js);
 						if (js.code === 404) {
 							console.warn(`[Paho MQTT] Shadow '${cfg.shadowName}' does not exist for thing '${cfg.thingName}'`);
-							setStatus("Shadow未作成", "warn");
+							setStatus("Shadow未作成（要デバイス初期化）", "warn");
 						}
+					} else if (topic.endsWith("/update/accepted")) {
+						console.log(`[Paho MQTT] Shadow update successful:`, js);
+					} else if (topic.endsWith("/update/rejected")) {
+						console.error(`[Paho MQTT] Shadow update rejected:`, js);
 					} else if (topic.endsWith("/update/documents")) {
 						const r = js?.current?.state?.reported;
 						if (r) update({
@@ -516,12 +483,12 @@
 	const cfg = window.IOTGW_CONFIG;
 	const COG_URL = `https://cognito-idp.${cfg.region}.amazonaws.com/`;
 
-	// CHANGED: 未認証ユーザーの場合は無効化
+	// CHANGED: 認証済みロール専用設定（idToken必須）
 	const idToken = sessionStorage.getItem("id_token");
 	if (!idToken) {
-		btn.textContent = "パスキー機能（要認証）";
+		btn.textContent = "パスキー機能（認証エラー）";
 		btn.disabled = true;
-		btn.title = "パスキー機能を使用するには認証が必要です";
+		btn.title = "認証情報が見つかりません";
 		return;
 	}
 
