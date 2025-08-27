@@ -1,8 +1,3 @@
-<!-- amr-control.html (UIレイヤ：AMR操作画面)
-  役割: 認証後のAMR操作UI。共通スタイルは style.css を使用。
-  参照: README の配信/CSP方針、手順書のCloudFront/キャッシュ（詳細は正資料を参照）
-  注意: サインアウトボタンの id は logoutBtn に統一（app.js のハンドラ参照）
--->
 <!doctype html>
 <html lang="ja">
 
@@ -18,12 +13,16 @@
 	<div class="container">
 		<header class="header">
 			<div class="brand">
-				<div class="brand-badge"></div> AMR Control
+				<div class="brand-badge"></div>
+				AMR Control
 			</div>
 			<div class="header-actions">
-				<span id="conn-badge" class="badge"><span class="dot idle"></span>offline</span>
-				<!-- ▼ 追加：バーガーメニュー（details/summaryでJS不要・最小差分） -->
-				<!-- 追加：バーガーメニュー -->
+				<span id="conn-badge" class="badge">
+					<span class="dot idle"></span>
+					<span id="conn-text">offline</span>
+				</span>
+
+				<!-- バーガーメニュー（details/summaryでJS不要・最小差分） -->
 				<details id="appMenu" class="menu">
 					<summary id="menuToggle" class="icon-btn" aria-label="メニュー" role="button">
 						<span class="hamburger" aria-hidden="true">
@@ -41,41 +40,100 @@
 			</div>
 		</header>
 
-		<div class="card wrap">
-			<h1 class="card-title">AMR 操作</h1>
-			<div class="card-subtitle">Cognito（IDプール：未認証/認証両対応）＋ IoT MQTT over WSS (CryptoJS + Paho)</div>
-
-			<div class="row">
-				<label class="label">ステータス</label>
-				<div id="status" class="status">—</div>
-				<div id="hbInfo" class="small">HB: —</div>
-			</div>
-
-			<div class="row inline">
-				<div class="grow">
-					<label class="label" for="dest">行先</label>
-					<select id="dest" class="select"></select>
+		<main class="wrap">
+			<div class="card">
+				<h1 class="card-title">AMR 操作システム</h1>
+				<div class="card-subtitle">
+					Cognito（IDプール：未認証/認証両対応）+ IoT MQTT over WSS (SigV4 + Paho)
+					<br>リアルタイム状態監視とハートビート機能付き
 				</div>
-				<div>
-					<label class="label" style="visibility:hidden;">&nbsp;</label>
-					<button id="callBtn" class="btn btn-primary" disabled>接続中...</button>
+
+				<!-- システム状態表示 -->
+				<div class="row">
+					<label class="label">システム状態</label>
+					<div id="status" class="status">初期化中...</div>
+				</div>
+
+				<!-- ハートビート情報 -->
+				<div class="row">
+					<label class="label">最終通信</label>
+					<div id="hbInfo" class="small muted">HB: 待機中...</div>
+				</div>
+
+				<!-- 操作パネル -->
+				<div class="inline">
+					<div class="grow">
+						<label class="label" for="dest">目的地選択</label>
+						<select id="dest" class="select" aria-describedby="dest-help">
+							<option value="">目的地を選択してください</option>
+						</select>
+						<div id="dest-help" class="help small">AMRが移動する目的地を選択してください</div>
+					</div>
+					<div>
+						<label class="label" style="visibility:hidden;">&nbsp;</label>
+						<button id="callBtn" class="btn btn-primary" disabled aria-describedby="call-help">
+							<span id="call-text">接続中...</span>
+						</button>
+						<div id="call-help" class="help small">目的地へのAMR呼び出しを実行</div>
+					</div>
+				</div>
+
+				<!-- 詳細情報パネル -->
+				<div class="card mt-16">
+					<div class="card-title">接続詳細</div>
+					<div class="grid two">
+						<div>
+							<label class="label">認証状態</label>
+							<div id="authInfo" class="small">認証状態: 確認中...</div>
+						</div>
+						<div>
+							<label class="label">通信プロトコル</label>
+							<div class="small">MQTT over WebSocket (TLS)</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- 操作ログ -->
+				<div class="card mt-16">
+					<div class="card-title">操作履歴</div>
+					<div id="operationLog" class="small" style="max-height: 200px; overflow-y: auto;">
+						<div class="muted">システム準備中...</div>
+					</div>
+				</div>
+
+				<!-- ヒント -->
+				<div class="notice mt-16">
+					<strong>注意事項：</strong>
+					RP ID はサインイン画面（CloudFront FQDN）に設定済みである必要があります。
+					通信エラーが発生した場合は、ページを再読み込みして再接続してください。
 				</div>
 			</div>
+		</main>
+	</div>
 
-			<div class="row inline">
-				<div id="authInfo" class="small grow">認証状態: 未確認</div>
-				<!-- 下部サインアウト（重複）は削除 -->
-			</div>
+	<!-- 読み込み中オーバーレイ -->
+	<div id="loadingOverlay" class="loading-overlay">
+		<div class="card center" style="padding: 2rem; min-width: 200px;">
+			<div class="spinner"></div>
+			<div style="margin-top: 1rem;">処理中...</div>
+		</div>
+	</div>
 
-			<div class="row small">
-				ヒント：RP ID はサインイン画面（CloudFront FQDN）に設定済みである必要があります。
+	<!-- エラーダイアログ -->
+	<div id="errorDialog" class="modal hidden">
+		<div class="modal-content">
+			<div class="card">
+				<h3 class="card-title" style="color: var(--danger);">エラー</h3>
+				<p id="errorMessage">エラーが発生しました</p>
+				<div class="right mt-16">
+					<button id="errorOk" class="btn btn-primary">OK</button>
+				</div>
 			</div>
 		</div>
 	</div>
 
 	<!-- ライブラリ（セルフホスト UMD） -->
 	<script src="vendor/aws-sdk-2.1481.0.min.js"></script>
-	<!-- CHANGED: CryptoJS + moment.js + Paho MQTT に変更 -->
 	<script src="vendor/moment-2.29.4.min.js"></script>
 	<script src="vendor/crypto-js-4.1.1.min.js"></script>
 	<script src="vendor/paho-mqtt-1.1.0.min.js"></script>
@@ -83,6 +141,189 @@
 	<!-- 設定／操作ロジック -->
 	<script src="config.js"></script>
 	<script src="app.js"></script>
+
+	<style>
+		/* ページ固有のスタイル（デザインポリシーの変数を使用） */
+
+		/* select要素のダークテーマ対応 */
+		.select,
+		select {
+			background: var(--panel);
+			color: var(--text);
+			border: 1px solid var(--line);
+		}
+
+		.select option,
+		select option {
+			background: var(--panel);
+			color: var(--text);
+		}
+
+		/* フォーカス時の色も調整 */
+		.select:focus,
+		select:focus {
+			border-color: var(--brand);
+			box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 24%, transparent);
+		}
+
+		/* 読み込み中オーバーレイ */
+		.loading-overlay {
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: rgba(0, 0, 0, 0.7);
+			z-index: 9999;
+			opacity: 0;
+			visibility: hidden;
+			transition: opacity 0.3s ease, visibility 0.3s ease;
+		}
+
+		.loading-overlay.active {
+			opacity: 1;
+			visibility: visible;
+		}
+
+		/* スピナー */
+		.spinner {
+			width: 32px;
+			height: 32px;
+			border: 3px solid var(--line);
+			border-top: 3px solid var(--brand);
+			border-radius: 50%;
+			animation: spin 1s linear infinite;
+		}
+
+		@keyframes spin {
+			0% {
+				transform: rotate(0deg);
+			}
+
+			100% {
+				transform: rotate(360deg);
+			}
+		}
+
+		/* モーダルダイアログ */
+		.modal {
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: rgba(0, 0, 0, 0.6);
+			z-index: 10000;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 1rem;
+		}
+
+		.modal-content {
+			max-width: 500px;
+			width: 100%;
+			max-height: 90vh;
+			overflow-y: auto;
+		}
+
+		/* 状態別カラーリング */
+		.status {
+			padding: 0.5rem 1rem;
+			border-radius: var(--radius);
+			background: var(--line);
+			color: var(--text);
+			font-weight: 600;
+			text-align: center;
+			transition: all 0.3s ease;
+		}
+
+		.status.ok {
+			background: color-mix(in srgb, var(--ok) 15%, var(--panel));
+			color: var(--ok);
+		}
+
+		.status.warn {
+			background: color-mix(in srgb, var(--warn) 15%, var(--panel));
+			color: var(--warn);
+		}
+
+		.status.danger {
+			background: color-mix(in srgb, var(--danger) 15%, var(--panel));
+			color: var(--danger);
+		}
+
+		/* レスポンシブ対応 */
+		@media (max-width: 768px) {
+			.header {
+				flex-wrap: wrap;
+				gap: 0.5rem;
+			}
+
+			.inline {
+				flex-direction: column;
+				align-items: stretch;
+			}
+
+			.grid.two {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		/* アクセシビリティ配慮 */
+		@media (prefers-reduced-motion: reduce) {
+			.spinner {
+				animation: none;
+			}
+
+			* {
+				transition: none !important;
+			}
+		}
+
+		/* ハイコントラストモード対応 */
+		@media (prefers-contrast: high) {
+			.badge {
+				border-width: 2px;
+			}
+
+			.status {
+				border: 2px solid currentColor;
+			}
+
+			.select,
+			select {
+				border-width: 2px;
+			}
+		}
+
+		/* 操作ログのスタイリング */
+		#operationLog .log-entry {
+			padding: 0.25rem 0;
+			border-bottom: 1px solid var(--line);
+		}
+
+		#operationLog .log-entry:last-child {
+			border-bottom: none;
+		}
+
+		#operationLog .log-time {
+			color: var(--muted);
+			font-size: 0.75rem;
+		}
+
+		#operationLog .log-success {
+			color: var(--ok);
+		}
+
+		#operationLog .log-error {
+			color: var(--danger);
+		}
+
+		#operationLog .log-info {
+			color: var(--brand);
+		}
+	</style>
 </body>
 
 </html>
